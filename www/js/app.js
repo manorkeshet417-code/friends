@@ -2124,6 +2124,7 @@ async function nativeLoginDone(tok) {
 }
 /* ---------- notifications while Friends is closed (free: Firebase Cloud Messaging, sent by a Google Apps Script) ---------- */
 let pushReady = false, pushToken = '';
+const BUILD_TAG = 'push-2';
 async function setupPush() {
   if (!isNative() || pushReady || !S.user || be.mode !== 'live' || !be.savePushToken) return;
   pushReady = true;
@@ -2148,13 +2149,18 @@ function openFromPush(d) {
   else if (d.gid) go('group', { gid: d.gid });
   else if (d.kind === 'activity') go('activity');
 }
+// Returns the sender's answer ({ ok, sent } or { ok:false, error }), or { ok:false, error } when it couldn't be reached
 async function pushOut(o) {
-  if (!PUSH_URL || be.mode !== 'live' || !be.idToken) return;
+  if (!PUSH_URL) return { ok: false, error: 'no sender' };
+  if (be.mode !== 'live' || !be.idToken) return { ok: false, error: 'not live' };
   try {
-    const idToken = await be.idToken(); if (!idToken) return;
-    // text/plain + no-cors: a "simple" request, so Apps Script needs no CORS setup
-    await fetch(PUSH_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(Object.assign({ idToken }, o)) });
-  } catch (e) { console.warn('push out', e); }
+    const idToken = await be.idToken(); if (!idToken) return { ok: false, error: 'not signed in' };
+    // text/plain: a "simple" request (no preflight); Apps Script answers with Access-Control-Allow-Origin: *
+    const r = await fetch(PUSH_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(Object.assign({ idToken }, o)) });
+    const j = await r.json().catch(() => ({ ok: false, error: 'http ' + r.status }));
+    if (!j.ok) console.warn('push out', o.kind, j);
+    return j;
+  } catch (e) { console.warn('push out', e); return { ok: false, error: String((e && e.message) || e) }; }
 }
 function pushMsg(sc, m) {
   const p = m.text || (m.image ? '📷 תמונה' : m.video ? '🎬 סרטון' : m.audio ? '🎤 הודעה קולית' : m.share ? '🔗 פוסט' : 'הודעה חדשה');
@@ -2184,7 +2190,10 @@ A['app-update'] = () => checkAppUpdate(true);
 A['push-test'] = async () => {
   await setupPush();
   if (!pushToken) { permHelp('notif'); return; }
-  hud('נשלחה התראת בדיקה…'); pushOut({ kind: 'test', title: 'Friends', body: 'ההתראות עובדות 🎉 הן יגיעו גם כשהאפליקציה סגורה' });
+  hud('שולח התראת בדיקה…');
+  const r = await pushOut({ kind: 'test', title: 'Friends', body: 'ההתראות עובדות 🎉 הן יגיעו גם כשהאפליקציה סגורה' });
+  if (r.ok && r.sent) hud(`נשלחה ל-${r.sent} מכשירים. אמורה להגיע עכשיו`);
+  else await confirmSheet({ title: 'ההתראה לא נשלחה', msg: `תשובת השרת: ${r.ok ? 'לא נמצא מכשיר רשום' : r.error}\nגרסת האתר: ${BUILD_TAG}`, actions: [{ label: 'הבנתי' }] });
 };
 
 A['native-login'] = async b => { b.disabled = true; try { await nativeLoginDone(await be.googleTokenViaPopup()); } catch (e) { if (!(e && /popup-closed|cancelled-popup/.test(e.code || ''))) fail(e); } finally { b.disabled = false; } };
