@@ -5,6 +5,7 @@ import { LS, newCode } from './util.js';
 export function LocalBackend() {
   const me = { id: 'me', name: LS.get('friends.localName') || '', username: LS.get('friends.localUser') || '', photo: '', bio: '', following: [] };
   const groups = {}, sub = {}, L = new Map(), blobs = {}, posts = [], stories = [], comments = {}, images = {};
+  const evs = {}, evsub = {};
   let uid = 0;
   const id = () => 'l' + (++uid) + Math.random().toString(36).slice(2, 6);
   const emit = k => { const s = L.get(k); if (s) s.forEach(f => f()); };
@@ -54,6 +55,19 @@ export function LocalBackend() {
     async addStory(img, text) { stories.push({ id: id(), authorId: 'me', image: img.full.data, text: text || '', seen: [], createdAt: Date.now(), expiresAt: Date.now() + 864e5 }); emit('stories'); },
     async seeStory() {},
     async deleteStory(sid) { const i = stories.findIndex(s => s.id === sid); if (i >= 0) stories.splice(i, 1); emit('stories'); },
+
+    watchEventPages(cb) { return on('evs', () => cb(copy(Object.values(evs).sort((a, b) => b.createdAt - a.createdAt)))); },
+    watchEventPage(eid, cb) { return on('ev:' + eid, () => cb(evs[eid] ? copy(evs[eid]) : null)); },
+    watchEventSub(eid, sub, cb) { return on('ev:' + eid + ':' + sub, () => cb(copy((evsub[eid + ':' + sub] || [])))); },
+    async createEventPage(o) { const eid = id(); evs[eid] = Object.assign(copy(o), { id: eid, ownerId: 'me', rsvp: { me: 'yes' }, createdAt: Date.now() }); emit('evs'); return eid; },
+    async updateEventPage(eid, p) { Object.assign(evs[eid], copy(p)); emit('evs'); emit('ev:' + eid); },
+    async deleteEventPage(eid) { delete evs[eid]; emit('evs'); emit('ev:' + eid); },
+    async setEventMedia(eid, mid, data) { evsub[eid + ':m:' + mid] = data; },
+    async eventMedia(eid, mid) { return evsub[eid + ':m:' + mid] || ''; },
+    async rsvpEvent(eid, v) { evs[eid].rsvp.me = v; emit('evs'); emit('ev:' + eid); },
+    async saveEventVote(eid, v) { const l = evsub[eid + ':votes'] = (evsub[eid + ':votes'] || []).filter(x => x.id !== 'me'); l.push(Object.assign({ id: 'me' }, copy(v))); emit('ev:' + eid + ':votes'); },
+    async addEventComment(eid, text) { (evsub[eid + ':comments'] = evsub[eid + ':comments'] || []).push({ id: id(), authorId: 'me', text, createdAt: Date.now() }); emit('ev:' + eid + ':comments'); },
+    async deleteEventComment(eid, cid) { evsub[eid + ':comments'] = (evsub[eid + ':comments'] || []).filter(c => c.id !== cid); emit('ev:' + eid + ':comments'); },
 
     watchGroups(cb) { return on('groups', () => cb(Object.values(groups).filter(g => g.members.includes('me')).map(copy))); },
     async createGroup(o) { const gid = id(); groups[gid] = { id: gid, name: o.name, emoji: o.emoji, color: o.color, type: o.type || 'group', channels: o.channels || [{ id: 'main', name: 'כללי' }], ownerId: 'me', members: ['me'], inviteCode: newCode(), lastMessage: '', lastAt: Date.now(), lastBy: 'me', typing: {} }; box(gid); emit('groups'); return gid; },

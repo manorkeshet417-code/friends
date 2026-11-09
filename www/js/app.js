@@ -113,8 +113,11 @@ function go(screen, o, push) {
   if (screen === 'group' && o.ch && o.ch !== S.ch) { S.ch = o.ch; watchChannel(); }
   if (screen === 'user') { closeGroup(); closeDM(); if (o.uid) S.uid = o.uid; }
   if (screen === 'watch') { closeGroup(); closeDM(); if (o.pid) S.watch = o.pid; }
+  if (screen === 'events') { closeGroup(); closeDM(); }
+  if (screen === 'event') { closeGroup(); closeDM(); if (o.eid && o.eid !== S.eid) openEvent(o.eid); }
+  if (screen !== 'event' && S.eid) closeEvent();
   S.screen = screen; S.reply = null;
-  if (push !== false) { try { history.pushState({ screen, gid: S.gid, cid: S.cid, tab: S.tab, gtab: S.gtab, ch: S.ch, uid: S.uid, pid: S.watch }, ''); } catch (e) {} }
+  if (push !== false) { try { history.pushState({ screen, gid: S.gid, cid: S.cid, tab: S.tab, gtab: S.gtab, ch: S.ch, uid: S.uid, pid: S.watch, eid: S.eid }, ''); } catch (e) {} }
   render(true);
 }
 window.addEventListener('popstate', e => {
@@ -153,6 +156,7 @@ function watchAll() {
     softRender();
   }, fail);
   unsub.posts = be.watchPosts(async list => { S.posts = list; await loadUsers(list.map(p => p.authorId)); softRender(); }, fail);
+  unsub.events = be.watchEventPages(async list => { S.events = list; await loadUsers(list.map(p => p.ownerId)); softRender(); }, e => console.warn('events', e));
   unsub.stories = be.watchStories(async list => { S.stories = list; await loadUsers(list.map(s => s.authorId)); if (!S.story) softRender(); }, e => console.warn('stories', e));
   if (be.rtc) { calls = CallManager(be.rtc, callUI); unsub.incoming = calls.watchIncoming(); }
   loadUsers(following());
@@ -160,7 +164,8 @@ function watchAll() {
 }
 function stopAll() {
   closeGroup(); closeDM();
-  ['me', 'groups', 'chats', 'incoming', 'posts', 'stories'].forEach(k => { if (unsub[k]) { try { unsub[k](); } catch (e) {} unsub[k] = null; } });
+  closeEvent();
+  ['me', 'groups', 'chats', 'incoming', 'posts', 'stories', 'events'].forEach(k => { if (unsub[k]) { try { unsub[k](); } catch (e) {} unsub[k] = null; } });
   S.groups = []; S.chats = []; S.posts = []; S.stories = []; S.suggest = null; S.fcount = {}; S.flist = {}; prevAct = {};
 }
 const emptyData = () => ({ messages: [], events: [], images: [], homework: [], exams: [], timetable: {} });
@@ -227,8 +232,10 @@ function render(navigated, chatChanged) {
   else if (S.screen === 'chat' && S.cid) { html = viewDM(); }
   else if (S.screen === 'user' && S.uid) { html = viewProfilePage(S.uid, false); }
   else if (S.screen === 'watch' && S.watch) { html = viewWatch(); }
+  else if (S.screen === 'events') { html = viewEventList(); }
+  else if (S.screen === 'event' && S.eid) { html = viewEventPage(); }
   else { S.screen = 'root'; html = S.tab === 'chats' ? viewChats() : S.tab === 'profile' ? viewProfilePage(me(), true) : S.tab === 'videos' ? viewVideos() : viewHome(); tabs = rootTabs(); }
-  const solo = S.screen === 'chat' || S.screen === 'groupInfo' || S.screen === 'user' || S.screen === 'watch';
+  const solo = S.screen === 'chat' || S.screen === 'groupInfo' || S.screen === 'user' || S.screen === 'watch' || S.screen === 'events' || S.screen === 'event';
   app.className = (bare ? 'bare ' : '') + (chatVisible() ? (S.screen === 'chat' ? 'chat-pad solo ' : 'chat-pad ') : solo ? 'solo ' : '') + (navigated && S.anim ? 'anim-' + S.anim : '');
   S.anim = '';
   const keep = {}; app.querySelectorAll('[data-keep]').forEach(el => { keep[el.dataset.keep] = { el, playing: el.tagName === 'VIDEO' && !el.paused }; });
@@ -1028,8 +1035,8 @@ function storiesRow() {
 }
 function viewHome() {
   const fol = circle(), feed = S.posts.filter(p => p.kind === 'photo' && fol.has(p.authorId));
-  return bar({ title: 'Friends', eyebrow: local() ? '<span class="pill">תצוגה מקדימה</span>' : '', trail: `<button class="nb-btn" data-a="search" aria-label="חיפוש חברים">${icon('search', 23)}</button><button class="nb-btn" data-a="create" aria-label="יצירה">${icon('plusSq', 24)}</button>` }) +
-  storiesRow() + permCard() +
+  return bar({ title: 'Friends', eyebrow: local() ? '<span class="pill">תצוגה מקדימה</span>' : '', trail: `<button class="nb-btn" data-a="search" aria-label="חיפוש חברים">${icon('search', 23)}</button><button class="nb-btn" data-a="events" aria-label="אירועים">${icon('cal', 23)}</button><button class="nb-btn" data-a="create" aria-label="יצירה">${icon('plusSq', 24)}</button>` }) +
+  storiesRow() + permCard() + eventsStrip() +
   (canOfferInstall() && !LS.get('friends.noInstall') ? `<div class="tip">${icon('sparkles', 24)}<span class="body"><b>התקינו את Friends</b><br><span style="color:var(--label2);font-size:13px">${inAppBrowser() ? 'פתחו בדפדפן Chrome כדי להתקין' : 'אייקון במסך הבית, מסך מלא'}</span></span><button class="btn filled sm" data-a="install">התקנה</button><button class="icon-btn muted sm" data-a="install-hide" aria-label="סגירה">${icon('xmark', 16)}</button></div>` : '') +
   (feed.length ? feed.map(feedCard).join('') + (following().length < 3 ? suggestBox() : '')
     : `<div class="empty">${icon('photo', 56, 1.4)}<b>${following().length ? 'עוד אין פוסטים' : 'ברוכים הבאים ל-Friends'}</b><span>${following().length ? 'החברים שלך עוד לא פרסמו. תהיו הראשונים!' : 'עקבו אחרי חברים כדי לראות כאן את התמונות שלהם.'}</span><div class="btn-row" style="justify-content:center"><button class="btn filled sm" data-a="search">${icon('search', 16)} חיפוש חברים</button><button class="btn tinted sm" data-a="new-photo">פוסט ראשון</button></div></div>` + suggestBox());
@@ -1223,18 +1230,19 @@ function searchSheet() {
 
 /* ---------- create: photo post, video, story, groups ---------- */
 async function createSheet() {
-  const acts = [{ label: '📷 פוסט תמונה', k: 'new-photo' }, { label: '🎬 סרטון', k: 'new-video' }, { label: '⭕ סטורי', k: 'new-story' }, { label: '💬 קבוצה', k: 'g:group' }, { label: '🎮 שרת עם ערוצים', k: 'g:server' }, { label: '🎒 קבוצת כיתה', k: 'g:school' }];
+  const acts = [{ label: '📷 פוסט תמונה', k: 'new-photo' }, { label: '🎬 סרטון', k: 'new-video' }, { label: '⭕ סטורי', k: 'new-story' }, { label: '📅 דף אירוע', k: 'new-event-page' }, { label: '💬 קבוצה', k: 'g:group' }, { label: '🎮 שרת עם ערוצים', k: 'g:server' }, { label: '🎒 קבוצת כיתה', k: 'g:school' }];
   const r = await confirmSheet({ title: 'מה יוצרים?', actions: acts }); const a = acts[r]; if (!a) return;
   if (a.k.startsWith('g:')) groupForm(null, a.k.slice(2)); else A[a.k]();
 }
 function pickFile(target, accept) { S.pickFor = target; fileEl.accept = accept; fileEl.multiple = false; fileEl.value = ''; fileEl.click(); }
 async function pickHook() {
-  const t = S.pickFor; if (!['np-photo', 'np-video', 'story', 'avatar'].includes(t)) return false;
+  const t = S.pickFor; if (!['np-photo', 'np-video', 'story', 'avatar', 'cb'].includes(t)) return false;
   const file = fileEl.files[0]; if (!file) return true;
   try {
     if (t === 'np-video') { vprog('מעבד סרטון…', 0); const v = await prepVideo(file, p => vprog('מעבד סרטון…', p)); vprog(null); videoComposer(v); return true; }
     const im = await prepImage(file);
-    if (t === 'np-photo') photoComposer(im); else if (t === 'story') storyComposer(im); else if (S.onAvatar) S.onAvatar(im.thumb.data);
+    if (t === 'cb') { if (S.onPick) S.onPick(im); }
+    else if (t === 'np-photo') photoComposer(im); else if (t === 'story') storyComposer(im); else if (S.onAvatar) S.onAvatar(im.thumb.data);
   } catch (e) {
     vprog(null); const c = e && e.code;
     if (c === 'long') hud(`אפשר להעלות סרטון של עד ${VIDEO_MAX_SEC} שניות`, true);
@@ -1601,6 +1609,296 @@ function clock() { const el = $('#sb-time'); if (el) { const d = new Date(); el.
 clock(); setInterval(clock, 30000);
 setInterval(() => { if (!typing() && !closeForm && !S.viewer && !S.rec && S.screen !== 'chat') softRender(); }, 60000);
 
+/* ====================== Event pages ====================== */
+// A public page per event: the creator picks a look and builds it from sections;
+// everyone RSVPs, votes (Eurovision-style points or polls) and comments.
+const EV_THEMES = { euro: 'אירוויזיון ✨', party: 'מסיבה 🎉', sport: 'ספורט 🏆', night: 'ערב גאלה 🌙', minimal: 'נקי' };
+const EV_POINTS = [12, 10, 8, 7, 6, 5, 4, 3, 2, 1];
+const evId = () => Math.random().toString(36).slice(2, 9);
+const evPage = () => S.ev && S.ev.page;
+const evMine = () => { const p = evPage(); return !!p && p.ownerId === me(); };
+const myVote = () => (S.ev && S.ev.votes.find(v => v.id === me())) || { points: {}, poll: {} };
+const evTime = p => p && p.date ? new Date(p.date).getTime() : 0;
+function evWhen(p) {
+  if (!p.date) return '';
+  const d = new Date(p.date);
+  return `יום ${DAYS[d.getDay()]}, ${d.getDate()} ב${MONTHS[d.getMonth()]} · ${hhmm(d.getTime())}`;
+}
+function evTemplates(kind) {
+  const sched = items => ({ id: evId(), type: 'schedule', title: 'לוח זמנים', items });
+  if (kind === 'euro') return [
+    { id: evId(), type: 'entries', title: 'השירים', items: [] },
+    sched([{ t: '20:00', text: 'פתיחת המשדר' }, { t: '22:30', text: 'ההצבעה נפתחת' }, { t: '00:00', text: 'הכרזת המנצח' }]),
+    { id: evId(), type: 'text', title: 'חדשות ועדכונים', body: 'כאן יופיעו עדכונים מהמארגנים.' }];
+  if (kind === 'party') return [
+    sched([{ t: '20:00', text: 'מתחילים' }, { t: '21:00', text: 'אוכל' }, { t: '22:00', text: 'עוגה 🎂' }]),
+    { id: evId(), type: 'poll', title: 'מה אוכלים?', options: ['פיצה', 'המבורגר', 'סושי'] },
+    { id: evId(), type: 'text', title: 'מה להביא', body: '' }];
+  if (kind === 'sport') return [
+    { id: evId(), type: 'entries', title: 'הקבוצות', items: [] },
+    sched([{ t: '16:00', text: 'שלב הבתים' }, { t: '18:00', text: 'חצי גמר' }, { t: '19:00', text: 'גמר 🏆' }]),
+    { id: evId(), type: 'poll', title: 'מי לוקחת את הגביע?', options: [] }];
+  return [];
+}
+
+/* ---------- subscriptions ---------- */
+function openEvent(eid) {
+  closeEvent(); S.eid = eid; S.ev = { page: (S.events || []).find(e => e.id === eid) || null, votes: [], comments: [], cover: '' };
+  unsub.ev = [
+    be.watchEventPage(eid, async p => { if (S.eid !== eid) return; S.ev.page = p; if (p) await loadUsers([p.ownerId].concat(Object.keys(p.rsvp || {}))); softRender(); }, fail),
+    be.watchEventSub(eid, 'votes', list => { if (S.eid !== eid) return; S.ev.votes = list; softRender(); }, () => {}),
+    be.watchEventSub(eid, 'comments', async list => { if (S.eid !== eid) return; S.ev.comments = list; await loadUsers(list.map(c => c.authorId)); softRender(); }, () => {})
+  ];
+  be.eventMedia(eid, 'cover').then(d => { if (S.eid === eid && d) { S.ev.cover = d; softRender(); } }).catch(() => {});
+}
+function closeEvent() { (unsub.ev || []).forEach(u => { try { u(); } catch (e) {} }); unsub.ev = []; S.eid = null; S.ev = null; }
+
+/* ---------- the list of events ---------- */
+function evCard(p, wide) {
+  const going = Object.values(p.rsvp || {}).filter(v => v === 'yes').length, t = evTime(p), soon = t > Date.now();
+  return `<button class="evc ev-${esc(p.theme || 'minimal')}${wide ? ' wide' : ''}" data-a="open-event" data-v="${esc(p.id)}">
+    <span class="evc-img"${p.coverThumb ? ` style="background-image:url(${p.coverThumb})"` : ''}><span class="evc-tag">${esc(EV_THEMES[p.theme] || '')}</span></span>
+    <span class="evc-b"><b dir="auto">${esc(p.title)}</b><span>${esc(evWhen(p))}</span><span>${going} מגיעים${soon ? '' : ' · הסתיים'}</span></span></button>`;
+}
+function viewEventList() {
+  const now = Date.now() - 6 * 36e5, all = S.events || [];
+  const up = all.filter(p => evTime(p) >= now).sort((a, b) => evTime(a) - evTime(b));
+  const past = all.filter(p => evTime(p) < now).sort((a, b) => evTime(b) - evTime(a));
+  return bar({ inline: true, back: 'בית', title: 'אירועים', trail: `<button class="nb-btn" data-a="new-event-page" aria-label="אירוע חדש">${icon('plus', 24, 2.2)}</button>` }) +
+  (all.length ? `${up.length ? `<div class="section-h">בקרוב</div><div class="evc-list">${up.map(p => evCard(p, true)).join('')}</div>` : ''}
+    ${past.length ? `<div class="section-h">היו</div><div class="evc-list">${past.map(p => evCard(p, true)).join('')}</div>` : ''}`
+  : `<div class="empty">${icon('cal', 56, 1.4)}<b>עוד אין אירועים</b><span>צרו דף לאירוע: אירוויזיון עם הצבעות, מסיבה, טורניר או כל דבר אחר.</span><button class="btn filled sm" data-a="new-event-page">אירוע חדש</button></div>`);
+}
+// a strip on the home screen
+function eventsStrip() {
+  const up = (S.events || []).filter(p => evTime(p) >= Date.now() - 6 * 36e5).sort((a, b) => evTime(a) - evTime(b)).slice(0, 6);
+  if (!up.length) return '';
+  return `<div class="section-h" style="display:flex;justify-content:space-between;align-items:center"><span>אירועים קרובים</span><button class="nb-btn" data-a="events" style="font-size:15px;min-height:0;padding:0">הכל</button></div><div class="evc-row">${up.map(p => evCard(p)).join('')}</div>`;
+}
+
+/* ---------- an event page ---------- */
+function viewEventPage() {
+  const p = evPage();
+  if (!p) return bar({ inline: true, back: 'אירועים', title: '' }) + (S.ev && S.ev.page === null ? `<div class="empty"><b>האירוע לא נמצא</b><span>אולי הוא נמחק.</span></div>` : `<div class="loading" style="min-height:200px"><div class="spinner"></div></div>`);
+  const t = evTime(p), owner = S.members[p.ownerId] || { id: p.ownerId }, mine = evMine();
+  const rs = p.rsvp || {}, my = rs[me()], going = Object.keys(rs).filter(k => rs[k] === 'yes'), maybe = Object.keys(rs).filter(k => rs[k] === 'maybe').length;
+  const cover = S.ev.cover || p.coverThumb;
+  return bar({ inline: true, back: 'אירועים', title: '', trail: `<button class="nb-btn" data-a="share-event" aria-label="שיתוף">${icon('share', 22)}</button>${mine ? `<button class="nb-btn" data-a="event-menu" aria-label="ניהול האירוע">${icon('more', 24)}</button>` : ''}` }) +
+  `<div class="evp ev-${esc(p.theme || 'minimal')}">
+    <header class="ev-hero"${cover ? ` style="--cover:url(${cover})"` : ''}>
+      <span class="ev-badge">${esc(EV_THEMES[p.theme] || 'אירוע')}</span>
+      <h1 dir="auto">${esc(p.title)}</h1>${p.subtitle ? `<div class="ev-sub" dir="auto">${esc(p.subtitle)}</div>` : ''}
+      <div class="ev-meta">${p.date ? `<span>${icon('cal', 16)} ${esc(evWhen(p))}</span>` : ''}${p.place ? `<span>📍 ${esc(p.place)}</span>` : ''}</div>
+      ${t > Date.now() ? `<div class="ev-cd" data-cd="${t}">${cdParts(t)}</div>` : t ? `<div class="ev-live">${Date.now() - t < 6 * 36e5 ? '● עכשיו' : 'האירוע הסתיים'}</div>` : ''}
+      <button class="ev-host" data-a="user" data-v="${esc(p.ownerId)}">${avatar(owner, 24)}<span>מארגן/ת: ${esc(nameOf(owner))}</span></button>
+    </header>
+    <section class="ev-card ev-rsvp">
+      <div class="ev-rs-btns">${[['yes', 'מגיע/ה'], ['maybe', 'אולי'], ['no', 'לא']].map(([v, l]) => `<button class="${my === v ? 'on' : ''}" data-a="ev-rsvp" data-v="${v}">${l}</button>`).join('')}</div>
+      <div class="ev-going">${going.slice(0, 8).map(id => avatar(S.members[id] || { id }, 28)).join('')}<span>${going.length} מגיעים${maybe ? ` · ${maybe} אולי` : ''}</span></div>
+    </section>
+    ${p.desc ? `<section class="ev-card"><div class="ev-text" dir="auto">${linkify(p.desc)}</div></section>` : ''}
+    ${(p.blocks || []).map((b, i) => evBlock(b, i, p.blocks.length)).join('')}
+    ${mine ? `<button class="ev-add" data-a="ev-add-block">${icon('plus', 20, 2.2)} הוספת חלק לדף</button>` : ''}
+    <section class="ev-card"><h2>תגובות${S.ev.comments.length ? ` · ${S.ev.comments.length}` : ''}</h2>
+      <div class="ev-cmts">${S.ev.comments.map(c => { const a = S.members[c.authorId] || { id: c.authorId }; return `<div class="cmt">${avatar(a, 30)}<div style="flex:1;min-width:0"><div class="cb"><b>${esc(nameOf(a))}</b><p dir="auto">${linkify(c.text)}</p></div><div class="ct">${ago(c.createdAt)}${c.authorId === me() || mine ? ` · <button style="color:var(--red);font-size:12px" data-a="ev-del-cmt" data-v="${esc(c.id)}">מחיקה</button>` : ''}</div></div></div>`; }).join('') || '<p class="ev-muted">עוד אין תגובות. תהיו הראשונים!</p>'}</div>
+      <form id="evc-form" class="ev-cbar"><input id="evc-in" dir="auto" maxlength="1000" placeholder="כתבו משהו…" aria-label="תגובה" autocomplete="off"><button class="btn filled sm">שליחה</button></form>
+    </section>
+  </div>`;
+}
+function cdParts(t) {
+  const s = Math.max(0, Math.floor((t - Date.now()) / 1000)), d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return [[d, 'ימים'], [h, 'שעות'], [m, 'דקות'], [x, 'שניות']].map(([n, l]) => `<span><b>${String(n).padStart(2, '0')}</b><i>${l}</i></span>`).join('');
+}
+setInterval(() => { $$('[data-cd]').forEach(el => { const t = +el.dataset.cd; if (t > Date.now()) el.innerHTML = cdParts(t); else softRender(); }); }, 1000);
+
+function evBlockHead(b, i, n, extra) {
+  return `<div class="ev-bh"><h2 dir="auto">${esc(b.title || '')}</h2>${extra || ''}${evMine() ? `<button class="icon-btn muted sm" data-a="ev-block-menu" data-v="${esc(b.id)}" aria-label="עריכת החלק">${icon('more', 18)}</button>` : ''}</div>`;
+}
+function evBlock(b, i, n) {
+  if (b.type === 'text') return `<section class="ev-card">${evBlockHead(b, i, n)}<div class="ev-text" dir="auto">${b.body ? linkify(b.body) : '<span class="ev-muted">(ריק)</span>'}</div></section>`;
+  if (b.type === 'schedule') return `<section class="ev-card">${evBlockHead(b, i, n)}<ol class="ev-sched">${(b.items || []).map(x => `<li><b dir="ltr">${esc(x.t)}</b><span dir="auto">${esc(x.text)}</span></li>`).join('')}</ol></section>`;
+  if (b.type === 'poll') {
+    const opts = b.options || [], counts = opts.map(() => 0);
+    S.ev.votes.forEach(v => { const k = (v.poll || {})[b.id]; if (k != null && counts[k] != null) counts[k]++; });
+    const total = counts.reduce((a, c) => a + c, 0), mineI = myVote().poll ? myVote().poll[b.id] : undefined;
+    return `<section class="ev-card">${evBlockHead(b, i, n)}${opts.length ? `<div class="ev-poll">${opts.map((o, k) => { const pc = total ? Math.round(counts[k] * 100 / total) : 0; return `<button class="ev-po${mineI === k ? ' on' : ''}" data-a="ev-poll" data-v="${esc(b.id)}" data-i="${k}"><span class="ev-po-bar" style="width:${pc}%"></span><span class="ev-po-t" dir="auto">${esc(o)}</span><span class="ev-po-n">${total ? pc + '%' : ''}</span></button>`; }).join('')}</div><p class="ev-muted">${total} הצבעות</p>` : '<p class="ev-muted">עוד אין אפשרויות.</p>'}</section>`;
+  }
+  if (b.type === 'entries') {
+    const view = (S.evView || {})[b.id] || 'vote', items = b.items || [];
+    const totals = {}; items.forEach(e => totals[e.id] = 0);
+    const voters = S.ev.votes.filter(v => Object.keys(v.points || {}).length);
+    voters.forEach(v => Object.entries(v.points || {}).forEach(([eid, pts]) => { if (eid in totals) totals[eid] += +pts || 0; }));
+    const mp = myVote().points || {}, used = Object.keys(mp).filter(k => k in totals).length;
+    const seg = `<div class="seg ev-seg"><button class="${view === 'vote' ? 'on' : ''}" data-a="ev-view" data-v="${esc(b.id)}" data-w="vote">הצבעה</button><button class="${view === 'board' ? 'on' : ''}" data-a="ev-view" data-v="${esc(b.id)}" data-w="board">טבלה</button></div>`;
+    let body;
+    if (!items.length) body = `<p class="ev-muted">${evMine() ? 'הוסיפו את המתמודדים, ואז כולם יוכלו להצביע.' : 'המארגנים עוד לא הוסיפו מתמודדים.'}</p>`;
+    else if (view === 'board') {
+      const sorted = items.slice().sort((a, c) => totals[c.id] - totals[a.id]), max = Math.max(1, ...Object.values(totals));
+      body = `<ol class="ev-board">${sorted.map((e, k) => `<li class="${k < 3 && totals[e.id] ? 'top' + (k + 1) : ''}"><span class="ev-rank">${k < 3 && totals[e.id] ? ['🥇', '🥈', '🥉'][k] : k + 1}</span>${entryFace(e)}<span class="ev-en"><b dir="auto">${e.img && e.flag ? esc(e.flag) + ' ' : ''}${esc(e.name)}</b><span class="ev-bar"><i style="width:${Math.round(totals[e.id] * 100 / max)}%"></i></span></span><span class="ev-pts">${totals[e.id]}</span></li>`).join('')}</ol><p class="ev-muted">${voters.length} מצביעים · מתעדכן בזמן אמת</p>`;
+    } else {
+      body = `<p class="ev-hint">חלקו 12, 10 ו-8 עד 1 נקודות לאהובים עליכם. בחרתם ${used} מתוך ${EV_POINTS.length}.</p>
+        <ol class="ev-entries">${items.map((e, k) => `<li><span class="ev-num">${k + 1}</span>${entryFace(e)}<button class="ev-en" ${evMine() ? `data-a="ev-entry-menu" data-v="${esc(b.id)}" data-i="${esc(e.id)}"` : 'tabindex="-1"'}><b dir="auto">${e.img && e.flag ? esc(e.flag) + ' ' : ''}${esc(e.name)}</b>${e.sub ? `<span dir="auto">${esc(e.sub)}</span>` : ''}</button>${e.link ? `<a class="icon-btn muted sm" href="${esc(e.link)}" target="_blank" rel="noopener" aria-label="צפייה">${icon('play', 18)}</a>` : ''}<button class="ev-chip${mp[e.id] ? ' on' : ''}" data-a="ev-points" data-v="${esc(b.id)}" data-i="${esc(e.id)}" aria-label="נקודות ל${esc(e.name)}">${mp[e.id] || '+'}</button></li>`).join('')}</ol>`;
+    }
+    return `<section class="ev-card">${evBlockHead(b, i, n, items.length ? seg : '')}${body}${evMine() ? `<button class="ev-mini" data-a="ev-add-entry" data-v="${esc(b.id)}">${icon('plus', 16, 2.4)} הוספת מתמודד</button>` : ''}</section>`;
+  }
+  return '';
+}
+const entryFace = e => e.img ? `<img class="ev-face" src="${e.img}" alt="">` : `<span class="ev-face ph">${esc(e.flag || (e.name || '?').slice(0, 1))}</span>`;
+
+/* ---------- editing ---------- */
+function pickImage(cb) { S.pickFor = 'cb'; S.onPick = cb; fileEl.accept = 'image/*'; fileEl.multiple = false; fileEl.value = ''; fileEl.click(); }
+async function tinyImage(src, max) {
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+  const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight)), c = document.createElement('canvas');
+  c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', .74);
+}
+function eventEditor(p) {
+  const isNew = !p;
+  let theme = p ? p.theme || 'minimal' : 'euro', tpl = 'euro', cover = null;
+  const d = p && p.date ? p.date : (() => { const x = new Date(Date.now() + 864e5); x.setHours(20, 0, 0, 0); return iso(x) + 'T20:00'; })();
+  const fs = formSheet({ title: isNew ? 'אירוע חדש' : 'עריכת האירוע', action: isNew ? 'יצירה' : 'שמירה', tall: true,
+    body: `${isNew ? `<div class="section-h">תבנית</div><div class="seg" id="ee-tpl">${[['euro', 'אירוויזיון'], ['party', 'מסיבה'], ['sport', 'טורניר'], ['blank', 'ריק']].map(([k, l]) => `<button type="button" data-tpl="${k}" class="${k === tpl ? 'on' : ''}">${l}</button>`).join('')}</div><p class="section-f" id="ee-tpl-f"></p>` : ''}
+      <div class="section-h">שם האירוע</div><div class="list"><div class="field"><input id="ee-title" maxlength="80" dir="auto" placeholder="למשל: אירוויזיון 2027 – ערב צפייה" value="${esc(p ? p.title : '')}" autofocus></div></div>
+      <div class="section-h">שורת משנה</div><div class="list"><div class="field"><input id="ee-sub" maxlength="120" dir="auto" placeholder="לא חובה" value="${esc(p ? p.subtitle || '' : '')}"></div></div>
+      <div class="section-h">מתי ואיפה</div><div class="list"><div class="field"><input id="ee-date" type="datetime-local" value="${esc(d)}"></div><div class="field"><input id="ee-place" maxlength="80" dir="auto" placeholder="מקום (לא חובה)" value="${esc(p ? p.place || '' : '')}"></div></div>
+      <div class="section-h">תיאור</div><div class="list"><textarea id="ee-desc" class="tt-in" rows="3" maxlength="2000" dir="auto" placeholder="על מה האירוע?">${esc(p ? p.desc || '' : '')}</textarea></div>
+      <div class="section-h">עיצוב</div><div class="ev-themes">${Object.entries(EV_THEMES).map(([k, l]) => `<button type="button" class="ev-sw ev-${k}${k === theme ? ' on' : ''}" data-th="${k}"><span></span>${l}</button>`).join('')}</div>
+      <div class="section-h">תמונת שער</div><div class="list"><button type="button" class="row" id="ee-cover">${icon('photo', 22)}<span class="body t acc" id="ee-cover-t">${p && p.coverThumb ? 'החלפת התמונה' : 'בחירת תמונה (לא חובה)'}</span></button></div>`,
+    async onOk(f) {
+      const title = f.querySelector('#ee-title').value.trim(); if (!title) { hud('תנו שם לאירוע', true); return false; }
+      const data = { title, subtitle: f.querySelector('#ee-sub').value.trim(), date: f.querySelector('#ee-date').value, place: f.querySelector('#ee-place').value.trim(), desc: f.querySelector('#ee-desc').value.trim(), theme };
+      if (cover) data.coverThumb = cover.thumb.data;
+      if (isNew) {
+        data.blocks = evTemplates(tpl);
+        const eid = await be.createEventPage(data);
+        if (cover) await be.setEventMedia(eid, 'cover', cover.full.data);
+        haptic(15); hud('דף האירוע נוצר'); setTimeout(() => go('event', { eid }), 250);
+      } else {
+        await be.updateEventPage(p.id, data);
+        if (cover) { await be.setEventMedia(p.id, 'cover', cover.full.data); if (S.ev) S.ev.cover = cover.full.data; }
+        hud('נשמר');
+      }
+    } });
+  const syncTpl = () => { const f = fs.querySelector('#ee-tpl-f'); if (f) f.textContent = { euro: 'שירים עם הצבעת 12 נקודות וטבלה חיה, לוח זמנים ועדכונים.', party: 'לוח זמנים, סקר ו"מה להביא".', sport: 'קבוצות עם ניקוד, לוח משחקים וסקר.', blank: 'דף ריק. מוסיפים חלקים אחרי היצירה.' }[tpl]; };
+  fs.querySelectorAll('[data-tpl]').forEach(b => b.onclick = () => { tpl = b.dataset.tpl; fs.querySelectorAll('[data-tpl]').forEach(x => x.classList.toggle('on', x === b)); if (tpl !== 'blank') { theme = { euro: 'euro', party: 'party', sport: 'sport' }[tpl]; fs.querySelectorAll('[data-th]').forEach(x => x.classList.toggle('on', x.dataset.th === theme)); } syncTpl(); });
+  fs.querySelectorAll('[data-th]').forEach(b => b.onclick = () => { theme = b.dataset.th; fs.querySelectorAll('[data-th]').forEach(x => x.classList.toggle('on', x === b)); });
+  fs.querySelector('#ee-cover').onclick = () => pickImage(im => { cover = im; fs.querySelector('#ee-cover-t').textContent = 'התמונה נבחרה ✓'; });
+  syncTpl();
+}
+async function saveBlocks(blocks) { const p = evPage(); if (!p) return; p.blocks = blocks; softRender(); await be.updateEventPage(p.id, { blocks }); }
+function blockForm(type, b) {
+  const isNew = !b; b = b || { id: evId(), type, title: { text: 'עדכון', schedule: 'לוח זמנים', poll: 'סקר', entries: 'המתמודדים' }[type] };
+  const fields = {
+    text: `<div class="section-h">תוכן</div><div class="list"><textarea id="bf-body" class="tt-in" rows="5" maxlength="3000" dir="auto">${esc(b.body || '')}</textarea></div>`,
+    schedule: `<div class="section-h">שורה לכל פריט: שעה ואז מה קורה</div><div class="list"><textarea id="bf-items" class="tt-in" rows="6" dir="auto" placeholder="20:00 פתיחה&#10;21:30 הופעה">${esc((b.items || []).map(x => x.t + ' ' + x.text).join('\n'))}</textarea></div>`,
+    poll: `<div class="section-h">אפשרויות (שורה לכל אחת)</div><div class="list"><textarea id="bf-opts" class="tt-in" rows="5" dir="auto">${esc((b.options || []).join('\n'))}</textarea></div>`,
+    entries: `<p class="section-f">אחרי השמירה מוסיפים מתמודדים עם "הוספת מתמודד". כל צופה מחלק 12, 10, 8–1 נקודות.</p>`
+  }[b.type];
+  formSheet({ title: isNew ? 'חלק חדש' : 'עריכת החלק', action: 'שמירה', tall: true,
+    body: `<div class="section-h">${b.type === 'poll' ? 'השאלה' : 'כותרת'}</div><div class="list"><div class="field"><input id="bf-title" maxlength="80" dir="auto" value="${esc(b.title || '')}" autofocus></div></div>${fields}`,
+    async onOk(f) {
+      const nb = Object.assign({}, b, { title: f.querySelector('#bf-title').value.trim() });
+      if (b.type === 'text') nb.body = f.querySelector('#bf-body').value.trim();
+      if (b.type === 'schedule') nb.items = f.querySelector('#bf-items').value.split('\n').map(l => l.trim()).filter(Boolean).slice(0, 30).map(l => { const m = l.match(/^(\S+)\s+(.*)$/); return m ? { t: m[1], text: m[2] } : { t: '', text: l }; });
+      if (b.type === 'poll') { nb.options = f.querySelector('#bf-opts').value.split('\n').map(l => l.trim()).filter(Boolean).slice(0, 10); if (nb.options.length < 2) { hud('צריך לפחות שתי אפשרויות', true); return false; } }
+      if (b.type === 'entries') nb.items = b.items || [];
+      const blocks = (evPage().blocks || []).slice(), k = blocks.findIndex(x => x.id === b.id);
+      if (k >= 0) blocks[k] = nb; else blocks.push(nb);
+      await saveBlocks(blocks); hud('נשמר');
+    } });
+}
+function entryForm(bid, e) {
+  const isNew = !e; e = e || { id: evId(), name: '', flag: '', sub: '', link: '', img: '' };
+  let img = e.img || '';
+  const fs = formSheet({ title: isNew ? 'מתמודד חדש' : 'עריכת מתמודד', action: 'שמירה', tall: true,
+    body: `<div style="display:grid;justify-items:center;gap:8px;padding:6px 0"><span id="nf-face">${entryFace(e)}</span><button type="button" class="nb-btn" id="nf-pick">תמונה (לא חובה)</button></div>
+      <div class="section-h">שם</div><div class="list"><div class="field"><input id="nf-name" maxlength="60" dir="auto" placeholder="שם השיר / הקבוצה / המתמודד" value="${esc(e.name)}" autofocus></div></div>
+      <div class="section-h">דגל או אימוג׳י</div><div class="list"><div class="field"><input id="nf-flag" maxlength="8" placeholder="🇮🇱" value="${esc(e.flag || '')}"></div></div>
+      <div class="section-h">שורה נוספת</div><div class="list"><div class="field"><input id="nf-sub" maxlength="80" dir="auto" placeholder="מדינה, אמן…" value="${esc(e.sub || '')}"></div></div>
+      <div class="section-h">קישור לצפייה</div><div class="list"><div class="field"><input id="nf-link" type="url" dir="ltr" placeholder="https://youtube.com/…" value="${esc(e.link || '')}"></div></div>`,
+    async onOk(f) {
+      const name = f.querySelector('#nf-name').value.trim(); if (!name) { hud('צריך שם', true); return false; }
+      let link = f.querySelector('#nf-link').value.trim(); if (link && !/^https?:\/\//.test(link)) link = 'https://' + link;
+      const ne = { id: e.id, name, flag: f.querySelector('#nf-flag').value.trim(), sub: f.querySelector('#nf-sub').value.trim(), link, img };
+      const blocks = (evPage().blocks || []).map(b => b.id !== bid ? b : Object.assign({}, b, { items: (b.items || []).some(x => x.id === e.id) ? b.items.map(x => x.id === e.id ? ne : x) : (b.items || []).concat(ne).slice(0, 40) }));
+      await saveBlocks(blocks); hud(isNew ? 'נוסף' : 'נשמר');
+    } });
+  fs.querySelector('#nf-pick').onclick = () => pickImage(async im => { img = await tinyImage(im.thumb.data, 160); fs.querySelector('#nf-face').innerHTML = entryFace({ img }); });
+}
+
+/* ---------- actions ---------- */
+Object.assign(A, {
+  events: () => go('events'),
+  'open-event': b => go('event', { eid: b.dataset.v }),
+  'new-event-page': () => eventEditor(null),
+  'ev-rsvp': async b => { const p = evPage(); if (!p) return; haptic(8); p.rsvp = Object.assign({}, p.rsvp, { [me()]: b.dataset.v }); render(); try { await be.rsvpEvent(p.id, b.dataset.v); } catch (e) { fail(e); } },
+  'ev-view': b => { S.evView = Object.assign({}, S.evView, { [b.dataset.v]: b.dataset.w }); render(); },
+  'ev-poll': async b => {
+    const p = evPage(); if (!p) return; const v = myVote(), poll = Object.assign({}, v.poll), k = +b.dataset.i;
+    if (poll[b.dataset.v] === k) delete poll[b.dataset.v]; else poll[b.dataset.v] = k;
+    haptic(8); await saveVote({ points: v.points || {}, poll });
+  },
+  'ev-points': async b => {
+    const p = evPage(); if (!p) return;
+    const bl = (p.blocks || []).find(x => x.id === b.dataset.v), e = bl && (bl.items || []).find(x => x.id === b.dataset.i); if (!e) return;
+    const v = myVote(), pts = Object.assign({}, v.points), who = {};
+    Object.entries(pts).forEach(([id, n]) => { const x = (bl.items || []).find(y => y.id === id); if (x) who[n] = x.name; });
+    const acts = EV_POINTS.map(n => ({ label: `${n} נקודות${who[n] && who[n] !== e.name ? ` (עכשיו אצל ${who[n]})` : pts[e.id] === n ? ' ✓' : ''}`, n })).concat(pts[e.id] ? [{ label: 'הסרת הניקוד', n: 0, destructive: true }] : []);
+    const r = await confirmSheet({ title: `${e.flag || ''} ${e.name}`.trim(), msg: 'כמה נקודות תתנו?', actions: acts }); const a = acts[r]; if (!a) return;
+    Object.keys(pts).forEach(id => { if (pts[id] === a.n || id === e.id) delete pts[id]; });
+    if (a.n) pts[e.id] = a.n;
+    haptic(a.n === 12 ? [30, 40, 30] : 10); if (a.n === 12) hud('12 נקודות! 🎉');
+    await saveVote({ points: pts, poll: v.poll || {} });
+  },
+  'ev-add-block': async () => {
+    const acts = [{ label: '🏆 מתמודדים והצבעה', t: 'entries' }, { label: '📊 סקר', t: 'poll' }, { label: '🕘 לוח זמנים', t: 'schedule' }, { label: '📝 טקסט / עדכון', t: 'text' }];
+    const r = await confirmSheet({ title: 'מה מוסיפים לדף?', actions: acts }); if (acts[r]) blockForm(acts[r].t, null);
+  },
+  'ev-block-menu': async b => {
+    const p = evPage(); const blocks = (p.blocks || []).slice(), k = blocks.findIndex(x => x.id === b.dataset.v); if (k < 0) return;
+    const acts = [{ label: 'עריכה', k: 'edit' }].concat(k > 0 ? [{ label: 'הזזה למעלה', k: 'up' }] : [], k < blocks.length - 1 ? [{ label: 'הזזה למטה', k: 'down' }] : [], [{ label: 'מחיקת החלק', k: 'del', destructive: true }]);
+    const r = await confirmSheet({ title: blocks[k].title, actions: acts }); const a = acts[r]; if (!a) return;
+    if (a.k === 'edit') { blockForm(blocks[k].type, blocks[k]); return; }
+    if (a.k === 'up' || a.k === 'down') { const j = a.k === 'up' ? k - 1 : k + 1; [blocks[k], blocks[j]] = [blocks[j], blocks[k]]; }
+    if (a.k === 'del') { if (await confirmSheet({ title: 'למחוק את החלק?', actions: [{ label: 'מחיקה', destructive: true }] }) !== 0) return; blocks.splice(k, 1); }
+    try { await saveBlocks(blocks); } catch (e) { fail(e); }
+  },
+  'ev-add-entry': b => entryForm(b.dataset.v, null),
+  'ev-entry-menu': async b => {
+    const p = evPage(), bl = (p.blocks || []).find(x => x.id === b.dataset.v), e = bl && (bl.items || []).find(x => x.id === b.dataset.i); if (!e) return;
+    const r = await confirmSheet({ title: e.name, actions: [{ label: 'עריכה' }, { label: 'מחיקה', destructive: true }] });
+    if (r === 0) entryForm(bl.id, e);
+    if (r === 1) { try { await saveBlocks(p.blocks.map(x => x.id !== bl.id ? x : Object.assign({}, x, { items: x.items.filter(y => y.id !== e.id) }))); } catch (x) { fail(x); } }
+  },
+  'event-menu': async () => {
+    const p = evPage(); if (!p) return;
+    const r = await confirmSheet({ title: p.title, actions: [{ label: 'עריכת פרטים ועיצוב' }, { label: 'הוספת חלק לדף' }, { label: 'מחיקת האירוע', destructive: true }] });
+    if (r === 0) eventEditor(p);
+    if (r === 1) A['ev-add-block']();
+    if (r === 2 && await confirmSheet({ title: `למחוק את "${p.title}"?`, msg: 'הדף, ההצבעות והתגובות יימחקו לכולם.', actions: [{ label: 'מחיקה', destructive: true }] }) === 0) {
+      try { await be.deleteEventPage(p.id); hud('האירוע נמחק'); back(); } catch (e) { fail(e); }
+    }
+  },
+  'share-event': async () => {
+    const p = evPage(); if (!p) return; const url = location.origin + location.pathname + '?e=' + p.id, text = `${p.title} – ${evWhen(p)}`;
+    if (navigator.share) { try { await navigator.share({ title: p.title, text, url }); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
+    copyText(text + '\n' + url);
+  },
+  'ev-del-cmt': async b => { const p = evPage(); if (!p) return; try { await be.deleteEventComment(p.id, b.dataset.v); } catch (e) { fail(e); } }
+});
+async function saveVote(v) {
+  const p = evPage(); if (!p) return;
+  const mineDoc = S.ev.votes.find(x => x.id === me());
+  if (mineDoc) Object.assign(mineDoc, v); else S.ev.votes.push(Object.assign({ id: me() }, v));
+  render();
+  try { await be.saveEventVote(p.id, v); } catch (e) { fail(e); }
+}
+Object.assign(F, {
+  'evc-form': async () => { const el = $('#evc-in'), t = el.value.trim(), p = evPage(); if (!t || !p) return; el.value = ''; try { await be.addEventComment(p.id, t); } catch (e) { el.value = t; fail(e); } }
+});
+
+
 /* ---------- boot ---------- */
 async function boot() {
   render(true);
@@ -1620,6 +1918,7 @@ function enter(u) {
   {
     S.members[u.id] = u; watchAll(); S.anim = 'fade'; render(true);
     // a shared post link (?p=…) opens that post once the feed has loaded
+    const se = params.get('e'); if (se) setTimeout(() => go('event', { eid: se }), 300);
     const sp = params.get('p'); if (sp) { let n = 0; const t = setInterval(() => { if (postById(sp) || ++n > 30) { clearInterval(t); if (postById(sp)) openPost(sp); } }, 500); }
     if (S.joinCode) { const c = S.joinCode; S.joinCode = ''; setTimeout(() => joinForm(c), 400); }
   }

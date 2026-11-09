@@ -120,6 +120,20 @@ export async function LiveBackend(cfg) {
     seeStory(id) { return updateDoc(doc(db, P + 'stories', id), { seen: arrayUnion(me.id) }).catch(() => {}); },
     deleteStory(id) { const b = writeBatch(db); b.delete(doc(db, P + 'stories', id)); return b.commit(); },
 
+    /* event pages: public pages, built by their creator; votes and comments from everyone */
+    watchEventPages(cb, err) { return onSnapshot(query(collection(db, P + 'eventPages'), orderBy('createdAt', 'desc'), limit(100)), s => cb(s.docs.map(read)), err); },
+    watchEventPage(eid, cb, err) { return onSnapshot(doc(db, P + 'eventPages', eid), s => cb(s.exists() ? read(s) : null), err); },
+    watchEventSub(eid, sub, cb, err) { return onSnapshot(sub === 'comments' ? query(collection(db, P + 'eventPages', eid, 'comments'), orderBy('createdAt', 'asc'), limit(300)) : collection(db, P + 'eventPages', eid, sub), s => cb(s.docs.map(read)), err); },
+    async createEventPage(o) { const ref = doc(collection(db, P + 'eventPages')); await setDoc(ref, Object.assign({}, o, { ownerId: me.id, rsvp: { [me.id]: 'yes' }, createdAt: serverTimestamp() })); return ref.id; },
+    updateEventPage(eid, p) { return updateDoc(doc(db, P + 'eventPages', eid), p); },
+    async deleteEventPage(eid) { const b = writeBatch(db); b.delete(doc(db, P + 'eventPages', eid, 'media', 'cover')); b.delete(doc(db, P + 'eventPages', eid)); await b.commit(); },
+    setEventMedia(eid, mid, data) { return setDoc(doc(db, P + 'eventPages', eid, 'media', mid), { data }); },
+    async eventMedia(eid, mid) { const s = await getDoc(doc(db, P + 'eventPages', eid, 'media', mid)); return s.exists() ? s.data().data : ''; },
+    rsvpEvent(eid, v) { return updateDoc(doc(db, P + 'eventPages', eid), { ['rsvp.' + me.id]: v }); },
+    saveEventVote(eid, v) { return setDoc(doc(db, P + 'eventPages', eid, 'votes', me.id), { points: v.points || {}, poll: v.poll || {} }); },
+    addEventComment(eid, text) { return addDoc(collection(db, P + 'eventPages', eid, 'comments'), { authorId: me.id, text, createdAt: serverTimestamp() }); },
+    deleteEventComment(eid, cid) { const b = writeBatch(db); b.delete(doc(db, P + 'eventPages', eid, 'comments', cid)); return b.commit(); },
+
     /* groups and servers */
     watchGroups(cb, err) { return onSnapshot(query(collection(db, P + 'groups'), where('members', 'array-contains', me.id)), s => cb(s.docs.map(read)), err); },
     async createGroup(o) {
