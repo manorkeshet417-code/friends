@@ -2162,6 +2162,25 @@ function pushMsg(sc, m) {
   if (sc.t === 'g') { const g = S.groups.find(x => x.id === sc.id); pushOut({ kind: 'msg', gid: sc.id, title: (g && g.name) || 'Friends', body: `${mine}: ${p}` }); }
   else pushOut({ kind: 'msg', cid: sc.id, title: mine, body: p });
 }
+/* ---------- updates of the Android app itself (the screens already update on their own, from the site) ---------- */
+const RELEASES = 'https://api.github.com/repos/manorkeshet417-code/friends/releases/latest';
+let appBuild = 0, newApk = null;
+async function checkAppUpdate(manual) {
+  if (!isNative()) return;
+  try {
+    if (!appBuild) appBuild = Number((await capPlugin('App').getInfo()).build) || 0;
+    const r = await fetch(RELEASES, { cache: 'no-store' }).then(x => x.json());
+    const n = Number(String(r.tag_name || '').replace(/\D/g, '')) || 0, a = (r.assets || []).find(x => /\.apk$/.test(x.name));
+    if (!a || n <= appBuild) { if (manual) hud(`Friends מעודכן (גרסה ${appBuild})`); return; }
+    newApk = { n, url: a.browser_download_url };
+    if (!manual && LS.get('friends.skipApk') === n) return;
+    const c = await confirmSheet({ title: 'גרסה חדשה של Friends', msg: `גרסה ${n} מוכנה (יש לך ${appBuild}).\n1. לחצו "עדכון" – הקובץ יורד.\n2. פתחו אותו מההתראה של ההורדה ← "עדכון".\nההודעות והקבוצות שלך נשמרות.`, actions: [{ label: 'עדכון' }, { label: 'אחר כך' }] });
+    if (c === 0) { try { await capPlugin('Browser').open({ url: newApk.url }); } catch (e) { location.href = newApk.url; } }
+    else LS.set('friends.skipApk', n);
+  } catch (e) { if (manual) hud('לא הצלחנו לבדוק עדכונים', true); }
+}
+A['app-update'] = () => checkAppUpdate(true);
+
 A['push-test'] = async () => {
   await setupPush();
   if (!pushToken) { permHelp('notif'); return; }
@@ -2171,7 +2190,7 @@ A['push-test'] = async () => {
 A['native-login'] = async b => { b.disabled = true; try { await nativeLoginDone(await be.googleTokenViaPopup()); } catch (e) { if (!(e && /popup-closed|cancelled-popup/.test(e.code || ''))) fail(e); } finally { b.disabled = false; } };
 
 function browserSection() {
-  if (isNative()) return `<div class="section-h">הגדרות הטלפון</div><div class="list"><button class="row" data-a="app-settings">${icon('gear', 22)}<span class="body t">פתיחת הגדרות האפליקציה</span><span class="chev">${icon('chev', 16)}</span></button>${PUSH_URL ? `<button class="row" data-a="push-test">${icon('bell', 22)}<span class="body t">בדיקת התראות</span><span class="chev">${icon('chev', 16)}</span></button>` : ''}</div><p class="section-f">שם: "הרשאות" ← מיקרופון, מצלמה, התראות.</p>`;
+  if (isNative()) return `<div class="section-h">הגדרות הטלפון</div><div class="list"><button class="row" data-a="app-settings">${icon('gear', 22)}<span class="body t">פתיחת הגדרות האפליקציה</span><span class="chev">${icon('chev', 16)}</span></button><button class="row" data-a="app-update">${icon('sparkles', 22)}<span class="body t">בדיקת עדכונים לאפליקציה</span><span class="chev">${icon('chev', 16)}</span></button>${PUSH_URL ? `<button class="row" data-a="push-test">${icon('bell', 22)}<span class="body t">בדיקת התראות</span><span class="chev">${icon('chev', 16)}</span></button>` : ''}</div><p class="section-f">שם: "הרשאות" ← מיקרופון, מצלמה, התראות.</p>`;
   return `<div class="section-h">פתיחה בדפדפן</div><div class="list">${browserLinks().map((l, i) => `<button class="row" data-a="open-browser" data-v="${i}">${icon('link', 22)}<span class="body t">${l.label}</span><span class="chev">${icon('chev', 16)}</span></button>`).join('')}<button class="row" data-a="copy-link">${icon('copy', 22)}<span class="body t">העתקת הקישור</span></button></div>
   <p class="section-f">${standalone() ? `פותח את ${APP_NAME} בדפדפן. שם, ליד הכתובת (🔒 או ⓘ) ← "הרשאות", רואים ומשנים כל הרשאה.` : inAppBrowser() ? 'את/ה עכשיו בתוך אפליקציה אחרת. בדפדפן אפשר להתקין, להיכנס עם Google ולהתקשר.' : 'בדפדפן, ליד הכתובת (🔒 או ⓘ) ← "הרשאות", רואים ומשנים כל הרשאה של האתר.'}</p>`;
 }
@@ -2266,6 +2285,7 @@ function enter(u) {
   {
     S.members[u.id] = u; watchAll(); S.anim = 'fade'; render(true);
     setTimeout(setupPush, 1500);
+    setTimeout(checkAppUpdate, 4000);
     // a shared post link (?p=…) opens that post once the feed has loaded
     const se = params.get('e'); if (se) setTimeout(() => go('event', { eid: se }), 300);
     if (params.has('ob') && !standalone()) setTimeout(() => hud('פתוח בדפדפן. הרשאות: 🔒 ליד הכתובת ← הרשאות'), 1200);
