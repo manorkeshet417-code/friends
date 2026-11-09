@@ -2058,7 +2058,13 @@ const isAndroid = () => /android/i.test(navigator.userAgent);
 const isIPhone = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 function browserLinks() {
   const host = location.host, path = location.pathname + location.search;
-  if (isAndroid()) return [{ label: 'פתיחה בדפדפן (Chrome)', href: 'intent://' + host + path + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(location.href) + ';end' }];
+  // The installed app claims every address under /friends/, so Android would just reopen the app.
+  // "/friends" (no slash) is outside it: Chrome opens it and GitHub Pages redirects to /friends/ inside Chrome.
+  const out = location.pathname.replace(/\/(index\.html)?$/, '') + '?ob=1';
+  if (isAndroid()) return [
+    { label: 'פתיחה בדפדפן (Chrome)', href: 'intent://' + host + out + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent('https://' + host + out) + ';end' },
+    { label: 'פתיחה בדפדפן אחר', href: 'https://' + host + out, blank: true }
+  ];
   if (isIPhone()) return [{ label: 'פתיחה בדפדפן (Safari)', href: 'x-safari-https://' + host + path }, { label: 'פתיחה ב-Chrome', href: 'googlechromes://' + host + path }];
   return [{ label: 'פתיחה בדפדפן', href: location.href, blank: true }];
 }
@@ -2150,6 +2156,7 @@ function enter(u) {
     S.members[u.id] = u; watchAll(); S.anim = 'fade'; render(true);
     // a shared post link (?p=…) opens that post once the feed has loaded
     const se = params.get('e'); if (se) setTimeout(() => go('event', { eid: se }), 300);
+    if (params.has('ob') && !standalone()) setTimeout(() => hud('פתוח בדפדפן. הרשאות: 🔒 ליד הכתובת ← הרשאות'), 1200);
     const sp = params.get('p'); if (sp) { let n = 0; const t = setInterval(() => { if (postById(sp) || ++n > 30) { clearInterval(t); if (postById(sp)) openPost(sp); } }, 500); }
     if (S.joinCode) { const c = S.joinCode; S.joinCode = ''; setTimeout(() => joinForm(c), 400); }
   }
