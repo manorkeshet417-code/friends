@@ -41,6 +41,8 @@ function sendFromClient(q) {
 
   if (kind === 'test') { // "send me a test" from settings: the read proves the token is valid
     if (!get('fr_users/' + me, q.idToken)) return { ok: false, error: 'denied' };
+    // a notification only shows while Friends is in the background, so the test waits for the app to be closed
+    if (q.delay) Utilities.sleep(Math.min(15, Number(q.delay) || 0) * 1000);
     return { ok: true, sent: pushTo([me], note, data) };
   }
   if (q.to && !q.cid && !q.gid) { // likes, comments, follows: one person, titled with the sender's real name

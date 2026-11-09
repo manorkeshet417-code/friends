@@ -2124,7 +2124,7 @@ async function nativeLoginDone(tok) {
 }
 /* ---------- notifications while Friends is closed (free: Firebase Cloud Messaging, sent by a Google Apps Script) ---------- */
 let pushReady = false, pushToken = '';
-const BUILD_TAG = 'push-2';
+const BUILD_TAG = 'push-3';
 async function setupPush() {
   if (!isNative() || pushReady || !S.user || be.mode !== 'live' || !be.savePushToken) return;
   pushReady = true;
@@ -2190,9 +2190,12 @@ A['app-update'] = () => checkAppUpdate(true);
 A['push-test'] = async () => {
   await setupPush();
   if (!pushToken) { permHelp('notif'); return; }
-  hud('שולח התראת בדיקה…');
-  const r = await pushOut({ kind: 'test', title: 'Friends', body: 'ההתראות עובדות 🎉 הן יגיעו גם כשהאפליקציה סגורה' });
-  if (r.ok && r.sent) hud(`נשלחה ל-${r.sent} מכשירים. אמורה להגיע עכשיו`);
+  // Android shows a notification only while Friends is in the background: the sender waits 10 seconds
+  await confirmSheet({ title: 'בדיקת התראות', msg: 'אחרי "הבנתי" יש לך 10 שניות:
+צאו מ-Friends (כפתור הבית או החלקה למעלה).
+תוך כמה שניות תגיע התראה אמיתית לטלפון.', actions: [{ label: 'הבנתי' }] });
+  const r = await pushOut({ kind: 'test', delay: 10, title: 'Friends', body: 'ההתראות עובדות 🎉 הן יגיעו גם כשהאפליקציה סגורה' });
+  if (r.ok && r.sent) hud('ההתראה נשלחה');
   else await confirmSheet({ title: 'ההתראה לא נשלחה', msg: `תשובת השרת: ${r.ok ? 'לא נמצא מכשיר רשום' : r.error}\nגרסת האתר: ${BUILD_TAG}`, actions: [{ label: 'הבנתי' }] });
 };
 
