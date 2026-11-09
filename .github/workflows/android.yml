@@ -33,7 +33,7 @@ jobs:
       - name: Create the Android project
         run: |
           npx cap add android
-          npx @capacitor/assets generate --android --iconBackgroundColor '#0a84ff' --iconBackgroundColorDark '#0a84ff' --splashBackgroundColor '#0a84ff' --splashBackgroundColorDark '#000000' || echo "::warning::icon generation failed, using the default icon"
+          npx @capacitor/assets generate --android --splashBackgroundColor '#0a84ff' --splashBackgroundColorDark '#000000' || echo "::warning::icon generation failed, using the default icon"
           npx cap sync android
 
       # Real Android permissions: these are what Settings > Apps > Friends > Permissions lists.
