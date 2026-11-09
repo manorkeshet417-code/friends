@@ -7,7 +7,7 @@
   "id": "./",
   "start_url": "./app.html",
   "scope": "./app.html",
-  "display": "standalone",
+  "display": "minimal-ui",
   "orientation": "portrait",
   "background_color": "#f2f2f7",
   "theme_color": "#f2f2f7",

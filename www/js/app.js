@@ -8,7 +8,7 @@ import { LocalBackend } from './backend-local.js';
 import { CallManager } from './calls.js';
 
 const root = document.documentElement; root.lang = 'he'; root.dir = 'rtl';
-const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const standalone = () => matchMedia('(display-mode: standalone), (display-mode: minimal-ui)').matches || navigator.standalone === true;
 if (standalone()) root.classList.add('native');
 const app = $('#app'), navEl = $('#nav'), sheetEl = $('#sheet'), screenEl = $('#screen'), fileEl = $('#file'), phoneEl = $('.phone');
 const onSite = /\.github\.io$/.test(location.hostname);
