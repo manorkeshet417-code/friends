@@ -10,12 +10,12 @@ const ICE = { iceServers: [
 const RING_MS = 40000;
 
 export function CallManager(rtc, ui) {
-  const { db, F } = rtc;
+  const { db, F } = rtc, CALLS = rtc.calls || 'calls';
   const { doc, collection, setDoc, updateDoc, addDoc, onSnapshot, query, where, serverTimestamp } = F;
   let cur = null;
 
   function watchIncoming() {
-    return onSnapshot(query(collection(db, 'calls'), where('to', '==', rtc.me()), where('status', '==', 'ringing')), s => {
+    return onSnapshot(query(collection(db, CALLS), where('to', '==', rtc.me()), where('status', '==', 'ringing')), s => {
       s.docChanges().forEach(ch => {
         const d = Object.assign({ id: ch.doc.id }, ch.doc.data());
         const t = d.createdAt && d.createdAt.toMillis ? d.createdAt.toMillis() : Date.now();
@@ -59,7 +59,7 @@ export function CallManager(rtc, ui) {
     catch (e) { cleanup(); ui.mediaError(e, kind); return; }
     cur.local.getTracks().forEach(t => pc.addTrack(t, cur.local));
     ui.update();
-    const ref = doc(collection(db, 'calls'));
+    const ref = doc(collection(db, CALLS));
     cur.id = ref.id; cur.ref = ref;
     // the call doc exists before any candidate is written (the rules read it)
     await setDoc(ref, { from: rtc.me(), to: other, kind, status: 'init', createdAt: serverTimestamp() });
@@ -88,7 +88,7 @@ export function CallManager(rtc, ui) {
   async function accept(call) {
     if (cur) return;
     const pc = setup('callee', call.kind, call.from);
-    cur.id = call.id; cur.ref = doc(db, 'calls', call.id);
+    cur.id = call.id; cur.ref = doc(db, CALLS, call.id);
     ui.open();
     try { cur.local = await getMedia(call.kind); }
     catch (e) { await updateDoc(cur.ref, { status: 'declined' }).catch(() => {}); cleanup(); ui.mediaError(e, call.kind); return; }
@@ -106,7 +106,7 @@ export function CallManager(rtc, ui) {
     cur.unsubs.push(onSnapshot(cur.ref, s => { const d = s.data(); if (d && d.status === 'ended' && cur) finish('ended', true); }));
   }
 
-  function decline(call) { return updateDoc(doc(db, 'calls', call.id), { status: 'declined' }).catch(() => {}); }
+  function decline(call) { return updateDoc(doc(db, CALLS, call.id), { status: 'declined' }).catch(() => {}); }
 
   async function finish(status, fromOther) {
     if (!cur || cur.status === 'ending') return;

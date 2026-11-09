@@ -1,7 +1,9 @@
+// Shared with Nest: this project (nest-family-d163e) serves both apps. Friends uses the fr_* collections.
+// The same file lives in both repos; publish it from either.
 rules_version = '2';
 
-// Friends: profiles, posts, videos and stories are visible to signed-in users;
-// groups, servers and classes only to their members; private chats and calls only to the two people in them.
+// Nest: only members of a group can see or write anything inside it;
+// private chats and calls are visible only to the two people in them.
 // Paste this into Firebase console > Firestore Database > Rules, then Publish.
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -12,6 +14,217 @@ service cloud.firestore {
     function isMember(gid) { return signedIn() && me() in groupDoc(gid).data.members; }
     function isOwner(gid) { return signedIn() && groupDoc(gid).data.ownerId == me(); }
     function onlyChanges(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
+
+    // Profiles: name, photo and birthday. Everyone signed in can read; each person writes their own.
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow write: if signedIn() && me() == uid
+        && request.resource.data.keys().hasOnly(['name', 'photo', 'birthday'])
+        && request.resource.data.name is string && request.resource.data.name.size() <= 40
+        && (!('birthday' in request.resource.data) || (request.resource.data.birthday is string && request.resource.data.birthday.size() <= 10));
+
+      // Private settings (SOS emergency contacts): only the owner can read or write them.
+      match /private/{docId} {
+        allow read, write: if signedIn() && me() == uid;
+      }
+    }
+
+    // Push: each device's notification token + muted groups. Tokens are useless without the sender's
+    // server credentials; the sender reads them with the caller's own sign-in.
+    match /push/{uid} {
+      allow read: if signedIn();
+      allow write: if signedIn() && me() == uid;
+    }
+
+    // Invite codes: anyone signed in who knows the code can look up which group it opens.
+    match /invites/{code} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && getAfter(/databases/$(database)/documents/groups/$(request.resource.data.groupId)).data.ownerId == me();
+      allow delete: if signedIn() && groupDoc(resource.data.groupId).data.ownerId == me();
+    }
+
+    match /groups/{gid} {
+      allow read: if signedIn() && me() in resource.data.members;
+
+      allow create: if signedIn()
+        && request.resource.data.ownerId == me()
+        && request.resource.data.members == [me()];
+
+      allow update: if signedIn() && (
+        // the owner manages the group (but cannot hand it to someone else here)
+        (resource.data.ownerId == me() && request.resource.data.ownerId == resource.data.ownerId)
+        // anyone with the current invite code can add exactly themselves
+        || (onlyChanges(['members', 'joinCode'])
+            && request.resource.data.members == resource.data.members.concat([me()])
+            && request.resource.data.joinCode == resource.data.inviteCode)
+        // a member (not the owner) can leave
+        || (me() in resource.data.members && resource.data.ownerId != me()
+            && onlyChanges(['members'])
+            && request.resource.data.members == resource.data.members.removeAll([me()]))
+        // members update the activity line and the "typing…" indicator
+        || (me() in resource.data.members && onlyChanges(['lastMessage', 'lastAt', 'lastBy', 'typing']))
+      );
+
+      allow delete: if signedIn() && resource.data.ownerId == me();
+
+      match /posts/{pid} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid) && request.resource.data.authorId == me();
+        allow update: if isMember(gid) && (resource.data.authorId == me() || onlyChanges(['likes', 'commentCount', 'votes']));
+        allow delete: if isMember(gid) && (resource.data.authorId == me() || isOwner(gid));
+
+        match /comments/{cid} {
+          allow read: if isMember(gid);
+          allow create: if isMember(gid) && request.resource.data.authorId == me();
+          allow delete: if isMember(gid) && (resource.data.authorId == me() || isOwner(gid));
+        }
+      }
+
+      match /messages/{mid} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid) && request.resource.data.authorId == me();
+        allow update: if isMember(gid) && onlyChanges(['reactions']);
+        allow delete: if isMember(gid) && (resource.data.authorId == me() || isOwner(gid));
+      }
+
+      match /events/{eid} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid) && request.resource.data.createdBy == me();
+        allow update: if isMember(gid) && (resource.data.createdBy == me() || onlyChanges(['rsvp']));
+        allow delete: if isMember(gid) && (resource.data.createdBy == me() || isOwner(gid));
+      }
+
+      match /lists/{lid} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid) && request.resource.data.createdBy == me();
+        allow update: if isMember(gid) && onlyChanges(['items', 'updatedAt', 'title']);
+        allow delete: if isMember(gid) && (resource.data.createdBy == me() || isOwner(gid));
+      }
+
+      match /images/{iid} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid) && request.resource.data.by == me();
+        allow delete: if isMember(gid) && (resource.data.by == me() || isOwner(gid));
+      }
+
+      // video chunks
+      match /blobs/{bid} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid) && request.resource.data.by == me();
+        allow delete: if isMember(gid) && (resource.data.by == me() || isOwner(gid));
+      }
+
+      // time capsules: everyone sees that a capsule exists and when it opens...
+      match /capsules/{cap} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid) && request.resource.data.by == me() && request.resource.data.openAt is timestamp;
+        allow delete: if isMember(gid) && (resource.data.by == me() || isOwner(gid));
+      }
+      // ...but the message itself stays sealed on the server until the opening date (only its author can read it before)
+      match /capsuleBody/{cap} {
+        allow read: if isMember(gid) && (resource.data.by == me()
+          || request.time >= get(/databases/$(database)/documents/groups/$(gid)/capsules/$(cap)).data.openAt);
+        allow create: if isMember(gid) && request.resource.data.by == me();
+        allow delete: if isMember(gid) && (resource.data.by == me() || isOwner(gid));
+      }
+
+      // question of the day: each member writes only their own answer
+      match /days/{day} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid) && request.resource.data.keys().hasOnly(['answers'])
+          && request.resource.data.answers.keys().hasOnly([me()]);
+        allow update: if isMember(gid) && onlyChanges(['answers'])
+          && request.resource.data.answers.diff(resource.data.answers).affectedKeys().hasOnly([me()]);
+      }
+
+      // what the kids said
+      // school groups: homework (each member ticks only their own "done"), exams, the timetable
+      match /homework/{hid} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid) && request.resource.data.by == me();
+        allow update: if isMember(gid) && onlyChanges(['done'])
+          && request.resource.data.done.toSet().difference(resource.data.done.toSet()).union(resource.data.done.toSet().difference(request.resource.data.done.toSet())).hasOnly([me()]);
+        allow delete: if isMember(gid) && (resource.data.by == me() || isOwner(gid));
+      }
+      match /exams/{xid} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid) && request.resource.data.by == me();
+        allow delete: if isMember(gid) && (resource.data.by == me() || isOwner(gid));
+      }
+      match /school/{sid} {
+        allow read, write: if isMember(gid);
+      }
+
+      // live safety state (SOS / escort): one doc per person; the others may only add their own ack
+      match /safety/{uid} {
+        allow read: if isMember(gid);
+        allow create, delete: if isMember(gid) && me() == uid;
+        allow update: if isMember(gid) && (me() == uid
+          || (onlyChanges(['acks']) && request.resource.data.acks.diff(resource.data.acks).affectedKeys().hasOnly([me()])));
+      }
+
+      match /quotes/{qid} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid) && request.resource.data.by == me();
+        allow update: if isMember(gid) && onlyChanges(['laughs']);
+        allow delete: if isMember(gid) && (resource.data.by == me() || isOwner(gid));
+      }
+
+      match /imageData/{iid} {
+        allow read: if isMember(gid);
+        allow create: if isMember(gid) && request.resource.data.by == me();
+        allow delete: if isMember(gid) && (resource.data.by == me() || isOwner(gid));
+      }
+    }
+
+    // Private chats between two people. The id is the two user ids, sorted, joined by "_".
+    match /chats/{cid} {
+      function chatDoc() { return get(/databases/$(database)/documents/chats/$(cid)); }
+      function inChat() { return signedIn() && me() in chatDoc().data.members; }
+
+      allow read: if signedIn() && (resource == null || me() in resource.data.members);
+      allow create: if signedIn()
+        && request.resource.data.members.size() == 2
+        && me() in request.resource.data.members
+        && cid == request.resource.data.members.join('_');
+      allow update: if signedIn() && me() in resource.data.members
+        && onlyChanges(['lastMessage', 'lastAt', 'lastBy', 'reads', 'typing']);
+
+      match /messages/{mid} {
+        allow read: if inChat();
+        allow create: if inChat() && request.resource.data.authorId == me();
+        allow update: if inChat() && onlyChanges(['reactions']);
+        allow delete: if inChat() && resource.data.authorId == me();
+      }
+
+      match /blobs/{bid} {
+        allow read: if inChat();
+        allow create: if inChat() && request.resource.data.by == me();
+        allow delete: if inChat() && resource.data.by == me();
+      }
+    }
+
+    // Voice/video call signaling: only the caller and the callee can see or touch a call.
+    match /calls/{callId} {
+      function callDoc() { return get(/databases/$(database)/documents/calls/$(callId)).data; }
+      function inCall() { return signedIn() && (me() == callDoc().from || me() == callDoc().to); }
+
+      allow read: if signedIn() && (resource == null || me() == resource.data.from || me() == resource.data.to);
+      allow create: if signedIn() && request.resource.data.from == me()
+        && request.resource.data.to is string && request.resource.data.to != me();
+      allow update: if signedIn() && (me() == resource.data.from || me() == resource.data.to)
+        && request.resource.data.from == resource.data.from && request.resource.data.to == resource.data.to;
+
+      match /{side}/{cand} {
+        allow read, create: if inCall() && (side == 'fromCandidates' || side == 'toCandidates');
+      }
+    }
+
+    /* ================= Friends (its own app; every collection starts with fr_) ================= */
+    function frGroupDoc(gid) { return get(/databases/$(database)/documents/fr_groups/$(gid)); }
+    function frIsMember(gid) { return signedIn() && me() in frGroupDoc(gid).data.members; }
+    function frIsOwner(gid) { return signedIn() && frGroupDoc(gid).data.ownerId == me(); }
     // the list changed only by adding or removing me
     function onlyMeIn(field) {
       return request.resource.data[field].toSet().difference(resource.data[field].toSet())
@@ -19,7 +232,7 @@ service cloud.firestore {
     }
 
     // Profiles. A username must be the one this person holds in /usernames.
-    match /users/{uid} {
+    match /fr_users/{uid} {
       allow read: if signedIn();
       allow write: if signedIn() && me() == uid
         && request.resource.data.keys().hasOnly(['name', 'photo', 'username', 'bio', 'following', 'birthday'])
@@ -29,18 +242,18 @@ service cloud.firestore {
         && (!('following' in request.resource.data) || (request.resource.data.following is list && request.resource.data.following.size() <= 2000))
         && (!('username' in request.resource.data)
             || (resource != null && 'username' in resource.data && request.resource.data.username == resource.data.username)
-            || getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username)).data.uid == me());
+            || getAfter(/databases/$(database)/documents/fr_usernames/$(request.resource.data.username)).data.uid == me());
     }
 
     // Usernames: one owner each, first come first served.
-    match /usernames/{name} {
+    match /fr_usernames/{name} {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.uid == me() && name.matches('^[a-z0-9._]{3,20}$');
       allow delete: if signedIn() && resource.data.uid == me();
     }
 
     // Photo posts and videos
-    match /posts/{pid} {
+    match /fr_posts/{pid} {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.authorId == me()
         && request.resource.data.likes == [] && request.resource.data.commentCount == 0 && request.resource.data.views == 0;
@@ -56,22 +269,22 @@ service cloud.firestore {
         allow read: if signedIn();
         allow create: if signedIn() && request.resource.data.authorId == me() && request.resource.data.text.size() <= 2000;
         allow delete: if signedIn() && (resource.data.authorId == me()
-          || get(/databases/$(database)/documents/posts/$(pid)).data.authorId == me());
+          || get(/databases/$(database)/documents/fr_posts/$(pid)).data.authorId == me());
       }
     }
-    match /postImages/{pid} {
+    match /fr_postImages/{pid} {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.by == me();
       allow delete: if signedIn() && resource.data.by == me();
     }
-    match /postBlobs/{bid} {
+    match /fr_postBlobs/{bid} {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.by == me();
       allow delete: if signedIn() && resource.data.by == me();
     }
 
     // Stories (the app hides them after 24 hours)
-    match /stories/{sid} {
+    match /fr_stories/{sid} {
       allow read: if signedIn();
       allow create: if signedIn() && request.resource.data.authorId == me() && request.resource.data.seen == [];
       allow update: if signedIn() && onlyChanges(['seen']) && onlyMeIn('seen');
@@ -79,15 +292,15 @@ service cloud.firestore {
     }
 
     // Invite codes: anyone signed in who knows the code can look up which group it opens.
-    match /invites/{code} {
+    match /fr_invites/{code} {
       allow read: if signedIn();
       allow create, update: if signedIn()
-        && getAfter(/databases/$(database)/documents/groups/$(request.resource.data.groupId)).data.ownerId == me();
-      allow delete: if signedIn() && groupDoc(resource.data.groupId).data.ownerId == me();
+        && getAfter(/databases/$(database)/documents/fr_groups/$(request.resource.data.groupId)).data.ownerId == me();
+      allow delete: if signedIn() && frGroupDoc(resource.data.groupId).data.ownerId == me();
     }
 
     // Groups, servers (with channels) and classes
-    match /groups/{gid} {
+    match /fr_groups/{gid} {
       allow read: if signedIn() && me() in resource.data.members;
 
       allow create: if signedIn()
@@ -113,59 +326,59 @@ service cloud.firestore {
       allow delete: if signedIn() && resource.data.ownerId == me();
 
       match /messages/{mid} {
-        allow read: if isMember(gid);
-        allow create: if isMember(gid) && request.resource.data.authorId == me();
-        allow update: if isMember(gid) && onlyChanges(['reactions']);
-        allow delete: if isMember(gid) && (resource.data.authorId == me() || isOwner(gid));
+        allow read: if frIsMember(gid);
+        allow create: if frIsMember(gid) && request.resource.data.authorId == me();
+        allow update: if frIsMember(gid) && onlyChanges(['reactions']);
+        allow delete: if frIsMember(gid) && (resource.data.authorId == me() || frIsOwner(gid));
       }
       match /channels/{ch}/messages/{mid} {
-        allow read: if isMember(gid);
-        allow create: if isMember(gid) && request.resource.data.authorId == me();
-        allow update: if isMember(gid) && onlyChanges(['reactions']);
-        allow delete: if isMember(gid) && (resource.data.authorId == me() || isOwner(gid));
+        allow read: if frIsMember(gid);
+        allow create: if frIsMember(gid) && request.resource.data.authorId == me();
+        allow update: if frIsMember(gid) && onlyChanges(['reactions']);
+        allow delete: if frIsMember(gid) && (resource.data.authorId == me() || frIsOwner(gid));
       }
       match /events/{eid} {
-        allow read: if isMember(gid);
-        allow create: if isMember(gid) && request.resource.data.createdBy == me();
-        allow update: if isMember(gid) && (resource.data.createdBy == me() || onlyChanges(['rsvp']));
-        allow delete: if isMember(gid) && (resource.data.createdBy == me() || isOwner(gid));
+        allow read: if frIsMember(gid);
+        allow create: if frIsMember(gid) && request.resource.data.createdBy == me();
+        allow update: if frIsMember(gid) && (resource.data.createdBy == me() || onlyChanges(['rsvp']));
+        allow delete: if frIsMember(gid) && (resource.data.createdBy == me() || frIsOwner(gid));
       }
       match /images/{iid} {
-        allow read: if isMember(gid);
-        allow create: if isMember(gid) && request.resource.data.by == me();
-        allow delete: if isMember(gid) && (resource.data.by == me() || isOwner(gid));
+        allow read: if frIsMember(gid);
+        allow create: if frIsMember(gid) && request.resource.data.by == me();
+        allow delete: if frIsMember(gid) && (resource.data.by == me() || frIsOwner(gid));
       }
       match /imageData/{iid} {
-        allow read: if isMember(gid);
-        allow create: if isMember(gid) && request.resource.data.by == me();
-        allow delete: if isMember(gid) && (resource.data.by == me() || isOwner(gid));
+        allow read: if frIsMember(gid);
+        allow create: if frIsMember(gid) && request.resource.data.by == me();
+        allow delete: if frIsMember(gid) && (resource.data.by == me() || frIsOwner(gid));
       }
       // video chunks sent in chats
       match /blobs/{bid} {
-        allow read: if isMember(gid);
-        allow create: if isMember(gid) && request.resource.data.by == me();
-        allow delete: if isMember(gid) && (resource.data.by == me() || isOwner(gid));
+        allow read: if frIsMember(gid);
+        allow create: if frIsMember(gid) && request.resource.data.by == me();
+        allow delete: if frIsMember(gid) && (resource.data.by == me() || frIsOwner(gid));
       }
       // classes: homework (each member ticks only their own "done"), exams, the timetable
       match /homework/{hid} {
-        allow read: if isMember(gid);
-        allow create: if isMember(gid) && request.resource.data.by == me();
-        allow update: if isMember(gid) && onlyChanges(['done']) && onlyMeIn('done');
-        allow delete: if isMember(gid) && (resource.data.by == me() || isOwner(gid));
+        allow read: if frIsMember(gid);
+        allow create: if frIsMember(gid) && request.resource.data.by == me();
+        allow update: if frIsMember(gid) && onlyChanges(['done']) && onlyMeIn('done');
+        allow delete: if frIsMember(gid) && (resource.data.by == me() || frIsOwner(gid));
       }
       match /exams/{xid} {
-        allow read: if isMember(gid);
-        allow create: if isMember(gid) && request.resource.data.by == me();
-        allow delete: if isMember(gid) && (resource.data.by == me() || isOwner(gid));
+        allow read: if frIsMember(gid);
+        allow create: if frIsMember(gid) && request.resource.data.by == me();
+        allow delete: if frIsMember(gid) && (resource.data.by == me() || frIsOwner(gid));
       }
       match /school/{sid} {
-        allow read, write: if isMember(gid);
+        allow read, write: if frIsMember(gid);
       }
     }
 
     // Private chats between two people. The id is the two user ids, sorted, joined by "_".
-    match /chats/{cid} {
-      function chatDoc() { return get(/databases/$(database)/documents/chats/$(cid)); }
+    match /fr_chats/{cid} {
+      function chatDoc() { return get(/databases/$(database)/documents/fr_chats/$(cid)); }
       function inChat() { return signedIn() && me() in chatDoc().data.members; }
 
       allow read: if signedIn() && (resource == null || me() in resource.data.members);
@@ -190,8 +403,8 @@ service cloud.firestore {
     }
 
     // Voice/video call signaling: only the caller and the callee can see or touch a call.
-    match /calls/{callId} {
-      function callDoc() { return get(/databases/$(database)/documents/calls/$(callId)).data; }
+    match /fr_calls/{callId} {
+      function callDoc() { return get(/databases/$(database)/documents/fr_calls/$(callId)).data; }
       function inCall() { return signedIn() && (me() == callDoc().from || me() == callDoc().to); }
 
       allow read: if signedIn() && (resource == null || me() == resource.data.from || me() == resource.data.to);
