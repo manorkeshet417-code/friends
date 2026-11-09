@@ -162,7 +162,7 @@ function watchAll() {
   unsub.stories = be.watchStories(async list => { S.stories = list; await loadUsers(list.map(s => s.authorId)); if (!S.story) softRender(); }, e => console.warn('stories', e));
   if (be.rtc) { calls = CallManager(be.rtc, callUI); unsub.incoming = calls.watchIncoming(); }
   loadUsers(following());
-  refreshMediaPerm();
+  refreshMediaPerm(); refreshPerms();
 }
 function stopAll() {
   closeGroup(); closeDM();
@@ -544,9 +544,10 @@ const callUI = {
 // Why the camera/microphone can't be used, and how to fix it on this device
 async function showMediaHelp(e, kind) {
   const h = mediaHelp(e, kind);
-  const acts = h.link ? [{ label: 'העתקת הקישור' }, { label: 'הבנתי' }] : [{ label: 'הבנתי' }];
-  const r = await confirmSheet({ title: h.title, msg: h.msg, actions: acts });
-  if (h.link && r === 0) copyText(location.origin + location.pathname);
+  if (e && /NotAllowed|Permission/.test(e.name || '') && !inAppBrowser()) { permHelp(kind === 'video' ? 'cam' : 'mic'); return; }
+  const r = await confirmSheet({ title: h.title, msg: h.msg, actions: [{ label: 'פתיחה בדפדפן' }, { label: 'העתקת הקישור' }, { label: 'הבנתי' }] });
+  if (r === 0) openInBrowser();
+  if (r === 1) copyText(location.origin + location.pathname);
 }
 async function startCall(uid, kind) {
   if (!calls) { hud('שיחות קול ווידאו זמינות באתר, אחרי כניסה עם Google', true); return; }
@@ -1452,12 +1453,12 @@ async function addFriendsSheet() {
 /* ---------- settings ---------- */
 function settingsSheet() {
   const perm = 'Notification' in window ? Notification.permission : 'unsupported';
+  refreshPerms();
   const fs = formSheet({ title: 'הגדרות', tall: true,
-    body: `<div class="section-h">מיקרופון ומצלמה</div><div class="list"><div class="row">${icon('video', 22)}<span class="body t">לשיחות ולהודעות קוליות</span>${mediaPermRow()}</div></div>
-      <div class="section-h">התראות</div><div class="list"><div class="row">${icon('bell', 22)}<span class="body t">התראות על הודעות ושיחות</span>${perm === 'granted' ? '<span class="val">פעילות</span>' : perm === 'denied' ? '<span class="val">חסומות</span>' : perm === 'unsupported' ? '<span class="val">לא נתמך</span>' : '<button class="btn tinted sm" data-a="notif">הפעלה</button>'}</div></div>
-      <p class="section-f">ההתראות מגיעות כש-Friends פתוח או ברקע.</p>
+    body: `<div class="section-h">הרשאות</div><div id="perm-box">${permsHTML()}</div>
+      <p class="section-f">${perm === 'granted' ? 'ההתראות מגיעות כש-Friends פתוח או ברקע. ' : ''}משהו חסום? "איך משחררים" מראה בדיוק איפה בהגדרות הטלפון, ו"פתיחה בדפדפן" למטה פותח את Friends בדפדפן.</p>
       ${canOfferInstall() ? `<div class="section-h"></div><div class="list"><button class="row" data-a="install">${icon('sparkles', 22)}<span class="body t">הוספה למסך הבית</span><span class="chev">${icon('chev', 16)}</span></button></div>` : ''}
-      ${onSite && !standalone() ? `<div class="section-h">דפדפן</div><div class="list"><a class="row" href="${esc(chromeLink())}" style="text-decoration:none;color:inherit">${icon('link', 22)}<span class="body t">פתיחה ב-Chrome</span><span class="chev">${icon('chev', 16)}</span></a><button class="row" data-a="copy-link">${icon('copy', 22)}<span class="body t">העתקת הקישור</span></button></div>` : ''}
+      ${browserSection()}
       <div class="section-h"></div><div class="list"><button class="row red" data-a="sign-out">התנתקות</button></div>
       <p class="section-f" style="text-align:center;padding-top:20px">Friends · הרשת של החברים</p>` });
   return fs;
@@ -2044,6 +2045,87 @@ Object.assign(A, {
 });
 Object.assign(F, {
   'sv-form': async f => { const inp = f.querySelector('input'), t = inp.value.trim(); if (!t) return; inp.value = ''; inp.blur(); await storyReply(t); renderStory(); }
+});
+
+/* ====================== Permissions center & open in the browser ====================== */
+// A web app has no permissions page of its own in the phone's settings: on Android Chrome holds them,
+// on iPhone Safari does. So the app shows every permission here, asks for it, and explains exactly where to change it.
+const APP_NAME = 'Friends';
+const PERM_KEYS = ['mic', 'cam', 'notif'];
+const isAndroid = () => /android/i.test(navigator.userAgent);
+const isIPhone = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function browserLinks() {
+  const host = location.host, path = location.pathname + location.search;
+  if (isAndroid()) return [{ label: 'פתיחה בדפדפן (Chrome)', href: 'intent://' + host + path + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(location.href) + ';end' }];
+  if (isIPhone()) return [{ label: 'פתיחה בדפדפן (Safari)', href: 'x-safari-https://' + host + path }, { label: 'פתיחה ב-Chrome', href: 'googlechromes://' + host + path }];
+  return [{ label: 'פתיחה בדפדפן', href: location.href, blank: true }];
+}
+function openInBrowser() { const l = browserLinks()[0]; if (l.blank) window.open(l.href, '_blank', 'noopener'); else location.href = l.href; }
+function browserSection() {
+  return `<div class="section-h">פתיחה בדפדפן</div><div class="list">${browserLinks().map(l => `<a class="row" href="${esc(l.href)}"${l.blank ? ' target="_blank" rel="noopener"' : ''} style="text-decoration:none;color:inherit">${icon('link', 22)}<span class="body t">${l.label}</span><span class="chev">${icon('chev', 16)}</span></a>`).join('')}<button class="row" data-a="copy-link">${icon('copy', 22)}<span class="body t">העתקת הקישור</span></button></div>
+  <p class="section-f">${standalone() ? `פותח את ${APP_NAME} בדפדפן. שם, ליד הכתובת (🔒 או ⓘ) ← "הרשאות", רואים ומשנים כל הרשאה.` : inAppBrowser() ? 'את/ה עכשיו בתוך אפליקציה אחרת. בדפדפן אפשר להתקין, להיכנס עם Google ולהתקשר.' : 'בדפדפן, ליד הכתובת (🔒 או ⓘ) ← "הרשאות", רואים ומשנים כל הרשאה של האתר.'}</p>`;
+}
+
+const PERMS = {
+  mic: { label: 'מיקרופון', sub: 'שיחות והודעות קוליות', ic: 'mic', chrome: 'מיקרופון', ios: 'מיקרופון' },
+  cam: { label: 'מצלמה', sub: 'שיחות וידאו', ic: 'video', chrome: 'מצלמה', ios: 'מצלמה' },
+  notif: { label: 'התראות', sub: 'הודעות, שיחות ועדכונים', ic: 'bell', chrome: 'התראות', ios: 'התראות' },
+  geo: { label: 'מיקום', sub: 'שליחת מיקום ב-SOS ובליווי', ic: 'route', chrome: 'מיקום', ios: 'מיקום' }
+};
+async function refreshPerms() {
+  const has = !!(navigator.permissions && navigator.permissions.query);
+  const q = async n => { if (!has) return 'unknown'; try { const p = await navigator.permissions.query({ name: n }); p.onchange = () => refreshPerms(); return p.state; } catch (e) { return 'unknown'; } };
+  const [mic, cam, geo] = await Promise.all([q('microphone'), q('camera'), q('geolocation')]);
+  const notif = 'Notification' in window ? ({ granted: 'granted', denied: 'denied', default: 'prompt' })[Notification.permission] : 'unsupported';
+  const next = { mic, cam, geo, notif }, changed = JSON.stringify(next) !== JSON.stringify(S.perms);
+  S.perms = next; S.mediaPerm = { mic, cam, unknown: mic === 'unknown' };
+  if (changed) { const box = $('#perm-box'); if (box) box.innerHTML = permsHTML(); else if (!typing()) softRender(); }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshPerms(); });
+function permsHTML() {
+  const st = S.perms || {};
+  return `<div class="list">${PERM_KEYS.map(k => {
+    const p = PERMS[k], s = st[k] || 'unknown';
+    const pill = s === 'granted' ? '<span class="pm ok">מאושר</span>' : s === 'denied' ? '<span class="pm no">חסום</span>' : s === 'unsupported' ? '<span class="pm">לא נתמך</span>' : '<span class="pm">לא אושר עדיין</span>';
+    const act = s === 'granted' || s === 'unsupported' ? '' : s === 'denied' ? `<button class="btn tinted sm" data-a="perm-help" data-v="${k}">איך משחררים</button>` : `<button class="btn filled sm" data-a="perm-ask" data-v="${k}">אישור</button>`;
+    return `<div class="row">${icon(p.ic, 22)}<span class="body"><span class="t">${p.label}</span><span class="sub">${p.sub}</span></span>${pill}${act}</div>`;
+  }).join('')}<button class="row" data-a="perm-help" data-v="all">${icon('info', 22)}<span class="body t acc">איך מנהלים הרשאות בהגדרות הטלפון</span><span class="chev">${icon('chev', 16)}</span></button></div>`;
+}
+function permSteps(k) {
+  const what = k === 'all' ? 'מיקרופון / מצלמה / מיקום / התראות' : PERMS[k].chrome;
+  if (isAndroid()) {
+    const notif = k === 'notif' || k === 'all' ? `\n\nהתראות אפשר לנהל גם מהגדרות הטלפון: הגדרות ← אפליקציות ← ${APP_NAME} ← התראות ← הפעלה.` : '';
+    return `באנדרואיד ההרשאות של ${APP_NAME} שמורות ב-Chrome:\n1. לחצו "פתיחה בדפדפן".\n2. ב-Chrome לחצו על הסמל שליד הכתובת (🔒 או ⓘ) ← "הרשאות".\n3. ${what} ← "אפשר".\n4. חזרו ל-${APP_NAME}.\n\nאם גם שם זה חסום, Chrome עצמו חסום בטלפון: הגדרות הטלפון ← אפליקציות ← Chrome ← הרשאות ← ${what} ← "אפשר".${notif}`;
+  }
+  if (isIPhone()) {
+    const notif = k === 'notif' || k === 'all' ? `\n\nהתראות: הגדרות ← התראות ← ${APP_NAME} ← "אפשר התראות".` : '';
+    return `באייפון ההרשאות של ${APP_NAME} שמורות ב-Safari:\n1. פתחו את הגדרות הטלפון ← Safari.\n2. גללו ל"הגדרות לאתרים" ← ${what}.\n3. בחרו "אפשר" או "שאל".\n4. חזרו ל-${APP_NAME} ונסו שוב.\n\nאפשר גם: "פתיחה בדפדפן" ← aA ליד הכתובת ← "הגדרות אתר".${notif}`;
+  }
+  return `לחצו על הסמל שליד הכתובת (🔒 או ⓘ) ← "הרשאות האתר" ← ${what} ← "אפשר", ואז רעננו את הדף.`;
+}
+async function permHelp(k) {
+  const r = await confirmSheet({ title: k === 'all' ? 'ניהול הרשאות' : `${PERMS[k].label} חסום/ה`, msg: permSteps(k), actions: [{ label: 'פתיחה בדפדפן' }, { label: 'העתקת הקישור' }, { label: 'הבנתי' }] });
+  if (r === 0) openInBrowser();
+  if (r === 1) copyText(location.origin + location.pathname);
+}
+async function permAsk(k) {
+  if (inAppBrowser()) { permHelp(k); return; }
+  try {
+    if (k === 'mic' || k === 'cam') { const s = await navigator.mediaDevices.getUserMedia(k === 'mic' ? { audio: true } : { video: true }); s.getTracks().forEach(t => t.stop()); hud(`${PERMS[k].label} אושר/ה`); }
+    else if (k === 'notif') { const p = await Notification.requestPermission(); if (p !== 'granted') throw Object.assign(new Error('denied'), { name: 'NotAllowedError' }); hud('ההתראות הופעלו'); }
+    else if (k === 'geo') { await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { timeout: 15000 })); hud('המיקום אושר'); }
+  } catch (e) {
+    const n = (e && (e.name || e.code)) || '';
+    if (/NotFound/.test(n)) hud(`לא נמצא/ה ${PERMS[k].label} במכשיר`, true);
+    else if (/NotReadable/.test(n)) hud(`${PERMS[k].label} תפוס/ה באפליקציה אחרת`, true);
+    else permHelp(k);
+  }
+  refreshPerms();
+}
+Object.assign(A, {
+  'perm-ask': b => permAsk(b.dataset.v),
+  'perm-help': b => permHelp(b.dataset.v),
+  'open-browser': () => openInBrowser()
 });
 
 /* ---------- boot ---------- */
