@@ -36,7 +36,7 @@ const clip = (s, n) => String(s || '').slice(0, n);
 function sendFromClient(q) {
   const me = uidOf(q.idToken);
   const kind = ['msg', 'call', 'activity', 'test'].indexOf(q.kind) >= 0 ? q.kind : 'msg';
-  const data = { kind: kind, cid: clip(q.cid, 120), gid: clip(q.gid, 120), from: me };
+  const data = { kind: kind, cid: clip(q.cid, 120), gid: clip(q.gid, 120), sender: me }; // not "from": FCM reserves that key
   const note = { title: clip(q.title || 'Friends', 80), body: clip(q.body, 180) };
 
   if (kind === 'test') { // "send me a test" from settings: the read proves the token is valid
