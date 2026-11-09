@@ -2068,9 +2068,24 @@ function browserLinks() {
   if (isIPhone()) return [{ label: 'פתיחה בדפדפן (Safari)', href: 'x-safari-https://' + host + path }, { label: 'פתיחה ב-Chrome', href: 'googlechromes://' + host + path }];
   return [{ label: 'פתיחה בדפדפן', href: location.href, blank: true }];
 }
-function openInBrowser() { const l = browserLinks()[0]; if (l.blank) window.open(l.href, '_blank', 'noopener'); else location.href = l.href; }
+// Opens the link with a real tap-like click; if the app is still in front a moment later, nothing opened:
+// offer another way and the copy-paste route, which always works.
+function openInBrowser(i) {
+  const links = browserLinks(), l = links[+i || 0] || links[0];
+  const a = document.createElement('a'); a.href = l.href; if (l.blank) { a.target = '_blank'; a.rel = 'noopener'; }
+  document.body.appendChild(a); a.click(); a.remove();
+  let left = false; const onHide = () => { if (document.hidden) left = true; };
+  document.addEventListener('visibilitychange', onHide);
+  setTimeout(() => { document.removeEventListener('visibilitychange', onHide); if (!left && !document.hidden) browserFallback(); }, 2200);
+}
+async function browserFallback() {
+  const plain = 'https://' + location.host + location.pathname.replace(/\/(index\.html)?$/, '') + '?ob=1';
+  const r = await confirmSheet({ title: 'הדפדפן לא נפתח?', msg: `אפשר בדרך אחרת, או ידנית:\n1. "העתקת הקישור".\n2. פתחו את ${isIPhone() ? 'Safari' : 'Chrome'}.\n3. הדביקו בשורת הכתובת ולחצו "עבור".\nשם, ליד הכתובת (🔒) ← "הרשאות".`, actions: [{ label: 'ניסיון בדרך אחרת' }, { label: 'העתקת הקישור' }, { label: 'הבנתי' }] });
+  if (r === 0) { const a = document.createElement('a'); a.href = plain; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); }
+  if (r === 1) copyText(plain);
+}
 function browserSection() {
-  return `<div class="section-h">פתיחה בדפדפן</div><div class="list">${browserLinks().map(l => `<a class="row" href="${esc(l.href)}"${l.blank ? ' target="_blank" rel="noopener"' : ''} style="text-decoration:none;color:inherit">${icon('link', 22)}<span class="body t">${l.label}</span><span class="chev">${icon('chev', 16)}</span></a>`).join('')}<button class="row" data-a="copy-link">${icon('copy', 22)}<span class="body t">העתקת הקישור</span></button></div>
+  return `<div class="section-h">פתיחה בדפדפן</div><div class="list">${browserLinks().map((l, i) => `<button class="row" data-a="open-browser" data-v="${i}">${icon('link', 22)}<span class="body t">${l.label}</span><span class="chev">${icon('chev', 16)}</span></button>`).join('')}<button class="row" data-a="copy-link">${icon('copy', 22)}<span class="body t">העתקת הקישור</span></button></div>
   <p class="section-f">${standalone() ? `פותח את ${APP_NAME} בדפדפן. שם, ליד הכתובת (🔒 או ⓘ) ← "הרשאות", רואים ומשנים כל הרשאה.` : inAppBrowser() ? 'את/ה עכשיו בתוך אפליקציה אחרת. בדפדפן אפשר להתקין, להיכנס עם Google ולהתקשר.' : 'בדפדפן, ליד הכתובת (🔒 או ⓘ) ← "הרשאות", רואים ומשנים כל הרשאה של האתר.'}</p>`;
 }
 
@@ -2133,7 +2148,7 @@ async function permAsk(k) {
 Object.assign(A, {
   'perm-ask': b => permAsk(b.dataset.v),
   'perm-help': b => permHelp(b.dataset.v),
-  'open-browser': () => openInBrowser()
+  'open-browser': b => openInBrowser(b && b.dataset ? b.dataset.v : 0)
 });
 
 /* ---------- boot ---------- */
