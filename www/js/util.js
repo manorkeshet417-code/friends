@@ -138,6 +138,8 @@ export const I = {
   hash: '<path d="M9.5 4 7.5 20M16.5 4l-2 16M4.5 9h16M3.5 15h16"/>',
   hashF: '<path d="M9.5 4 7.5 20M16.5 4l-2 16M4.5 9h16M3.5 15h16" stroke-width="2.6"/>',
   bookF: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z" fill="currentColor"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/>',
+  bookmark: '<path d="M6.5 3.5h11a1 1 0 0 1 1 1V21l-6.5-4.3L5.5 21V4.5a1 1 0 0 1 1-1z"/>',
+  bookmarkF: '<path d="M6.5 3.5h11a1 1 0 0 1 1 1V21l-6.5-4.3L5.5 21V4.5a1 1 0 0 1 1-1z" fill="currentColor"/>',
   grid: '<rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M9.3 4v16M14.7 4v16M4 9.3h16M4 14.7h16"/>',
   gear: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M3.8 7.3l2.3 1.3M17.9 15.4l2.3 1.3M3.8 16.7l2.3-1.3M17.9 8.6l2.3-1.3"/><circle cx="12" cy="12" r="6.6"/>',
   userF: '<path d="M12 2.5a9.5 9.5 0 1 0 0 19 9.5 9.5 0 0 0 0-19zm0 4.5a3.2 3.2 0 1 1 0 6.4A3.2 3.2 0 0 1 12 7zm0 13a7.8 7.8 0 0 1-6-2.8c1.3-1.9 3.5-3 6-3s4.7 1.1 6 3a7.8 7.8 0 0 1-6 2.8z" fill="currentColor" stroke="none"/>',

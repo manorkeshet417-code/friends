@@ -113,7 +113,7 @@ function go(screen, o, push) {
   if (screen === 'group' && o.ch && o.ch !== S.ch) { S.ch = o.ch; watchChannel(); }
   if (screen === 'user') { closeGroup(); closeDM(); if (o.uid) S.uid = o.uid; }
   if (screen === 'watch') { closeGroup(); closeDM(); if (o.pid) S.watch = o.pid; }
-  if (screen === 'events') { closeGroup(); closeDM(); }
+  if (screen === 'events' || screen === 'activity') { closeGroup(); closeDM(); }
   if (screen === 'event') { closeGroup(); closeDM(); if (o.eid && o.eid !== S.eid) openEvent(o.eid); }
   if (screen !== 'event' && S.eid) closeEvent();
   S.screen = screen; S.reply = null;
@@ -122,6 +122,7 @@ function go(screen, o, push) {
 }
 window.addEventListener('popstate', e => {
   if (S.story) { closeStory(); return; }
+  if ($('#shorts')) { closeShorts(); return; }
   if (closeForm) { closeForm(); return; }
   if (S.viewer) { S.viewer = null; renderViewer(); return; }
   const st = e.state || { screen: 'root' };
@@ -156,6 +157,7 @@ function watchAll() {
     softRender();
   }, fail);
   unsub.posts = be.watchPosts(async list => { S.posts = list; await loadUsers(list.map(p => p.authorId)); softRender(); }, fail);
+  watchNotifs();
   unsub.events = be.watchEventPages(async list => { S.events = list; await loadUsers(list.map(p => p.ownerId)); softRender(); }, e => console.warn('events', e));
   unsub.stories = be.watchStories(async list => { S.stories = list; await loadUsers(list.map(s => s.authorId)); if (!S.story) softRender(); }, e => console.warn('stories', e));
   if (be.rtc) { calls = CallManager(be.rtc, callUI); unsub.incoming = calls.watchIncoming(); }
@@ -165,7 +167,8 @@ function watchAll() {
 function stopAll() {
   closeGroup(); closeDM();
   closeEvent();
-  ['me', 'groups', 'chats', 'incoming', 'posts', 'stories', 'events'].forEach(k => { if (unsub[k]) { try { unsub[k](); } catch (e) {} unsub[k] = null; } });
+  closeShorts(true); S.notifs = [];
+  ['me', 'groups', 'chats', 'incoming', 'posts', 'stories', 'events', 'notifs'].forEach(k => { if (unsub[k]) { try { unsub[k](); } catch (e) {} unsub[k] = null; } });
   S.groups = []; S.chats = []; S.posts = []; S.stories = []; S.suggest = null; S.fcount = {}; S.flist = {}; prevAct = {};
 }
 const emptyData = () => ({ messages: [], events: [], images: [], homework: [], exams: [], timetable: {} });
@@ -233,9 +236,10 @@ function render(navigated, chatChanged) {
   else if (S.screen === 'user' && S.uid) { html = viewProfilePage(S.uid, false); }
   else if (S.screen === 'watch' && S.watch) { html = viewWatch(); }
   else if (S.screen === 'events') { html = viewEventList(); }
+  else if (S.screen === 'activity') { html = viewActivity(); }
   else if (S.screen === 'event' && S.eid) { html = viewEventPage(); }
   else { S.screen = 'root'; html = S.tab === 'chats' ? viewChats() : S.tab === 'profile' ? viewProfilePage(me(), true) : S.tab === 'videos' ? viewVideos() : viewHome(); tabs = rootTabs(); }
-  const solo = S.screen === 'chat' || S.screen === 'groupInfo' || S.screen === 'user' || S.screen === 'watch' || S.screen === 'events' || S.screen === 'event';
+  const solo = S.screen === 'chat' || S.screen === 'groupInfo' || S.screen === 'user' || S.screen === 'watch' || S.screen === 'events' || S.screen === 'event' || S.screen === 'activity';
   app.className = (bare ? 'bare ' : '') + (chatVisible() ? (S.screen === 'chat' ? 'chat-pad solo ' : 'chat-pad ') : solo ? 'solo ' : '') + (navigated && S.anim ? 'anim-' + S.anim : '');
   S.anim = '';
   const keep = {}; app.querySelectorAll('[data-keep]').forEach(el => { keep[el.dataset.keep] = { el, playing: el.tagName === 'VIDEO' && !el.paused }; });
@@ -1035,7 +1039,7 @@ function storiesRow() {
 }
 function viewHome() {
   const fol = circle(), feed = S.posts.filter(p => p.kind === 'photo' && fol.has(p.authorId));
-  return bar({ title: 'Friends', eyebrow: local() ? '<span class="pill">תצוגה מקדימה</span>' : '', trail: `<button class="nb-btn" data-a="search" aria-label="חיפוש חברים">${icon('search', 23)}</button><button class="nb-btn" data-a="events" aria-label="אירועים">${icon('cal', 23)}</button><button class="nb-btn" data-a="create" aria-label="יצירה">${icon('plusSq', 24)}</button>` }) +
+  return bar({ title: 'Friends', eyebrow: local() ? '<span class="pill">תצוגה מקדימה</span>' : '', trail: `<button class="nb-btn nb-dot" data-a="activity" aria-label="פעילות${unreadNotifs() ? `, ${unreadNotifs()} חדשות` : ''}">${icon('heart', 24)}${unreadNotifs() ? `<span class="dot">${unreadNotifs() > 9 ? '9+' : unreadNotifs()}</span>` : ''}</button><button class="nb-btn" data-a="search" aria-label="חיפוש חברים">${icon('search', 23)}</button><button class="nb-btn" data-a="events" aria-label="אירועים">${icon('cal', 23)}</button><button class="nb-btn" data-a="create" aria-label="יצירה">${icon('plusSq', 24)}</button>` }) +
   storiesRow() + permCard() + eventsStrip() +
   (canOfferInstall() && !LS.get('friends.noInstall') ? `<div class="tip">${icon('sparkles', 24)}<span class="body"><b>התקינו את Friends</b><br><span style="color:var(--label2);font-size:13px">${inAppBrowser() ? 'פתחו בדפדפן Chrome כדי להתקין' : 'אייקון במסך הבית, מסך מלא'}</span></span><button class="btn filled sm" data-a="install">התקנה</button><button class="icon-btn muted sm" data-a="install-hide" aria-label="סגירה">${icon('xmark', 16)}</button></div>` : '') +
   (feed.length ? feed.map(feedCard).join('') + (following().length < 3 ? suggestBox() : '')
@@ -1054,7 +1058,7 @@ function feedCard(p) {
   return `<article class="ig" id="p-${esc(p.id)}">
     <header class="ig-h"><button class="ig-u" data-a="user" data-v="${esc(p.authorId)}">${avatar(a, 34)}<span class="ig-n"><b>${esc(nameOf(a))}</b><span>${esc(uname(a))}</span></span></button><span class="when">${ago(p.createdAt)}</span>${p.authorId === me() ? `<button class="icon-btn muted sm" data-a="post-menu" data-v="${esc(p.id)}" aria-label="אפשרויות">${icon('more', 20)}</button>` : ''}</header>
     <div class="ig-media" data-a="dbl-like" data-v="${esc(p.id)}" style="aspect-ratio:${ratio}"><img data-pid="${esc(p.id)}" src="${pimg[p.id] || p.thumb}" alt="${esc(p.text || 'תמונה')}"><span class="ig-heart">${icon('heartF', 96)}</span></div>
-    <div class="ig-act"><button class="icon-btn${liked ? ' liked' : ''}" data-a="like" data-v="${esc(p.id)}" aria-pressed="${liked}" aria-label="לייק">${icon(liked ? 'heartF' : 'heart', 27)}</button><button class="icon-btn" data-a="comments" data-v="${esc(p.id)}" aria-label="תגובות">${icon('comment', 26)}</button><button class="icon-btn" data-a="share-post" data-v="${esc(p.id)}" aria-label="שליחה לחבר/ה">${icon('send', 24)}</button></div>
+    <div class="ig-act"><button class="icon-btn${liked ? ' liked' : ''}" data-a="like" data-v="${esc(p.id)}" aria-pressed="${liked}" aria-label="לייק">${icon(liked ? 'heartF' : 'heart', 27)}</button><button class="icon-btn" data-a="comments" data-v="${esc(p.id)}" aria-label="תגובות">${icon('comment', 26)}</button><button class="icon-btn" data-a="share-post" data-v="${esc(p.id)}" aria-label="שליחה לחבר/ה">${icon('send', 24)}</button><button class="icon-btn ig-save" data-a="save" data-v="${esc(p.id)}" aria-pressed="${isSaved(p.id)}" aria-label="שמירה">${icon(isSaved(p.id) ? 'bookmarkF' : 'bookmark', 25)}</button></div>
     ${likes.length ? `<div class="ig-likes">${likes.length === 1 ? 'לייק אחד' : likes.length + ' לייקים'}</div>` : ''}
     ${p.text ? `<div class="ig-cap"><b>${esc(first(nameOf(a)))}</b> <span dir="auto">${linkify(p.text)}</span></div>` : ''}
     ${p.commentCount ? `<button class="ig-more" data-a="comments" data-v="${esc(p.id)}">${p.commentCount === 1 ? 'תגובה אחת' : `צפייה בכל ${p.commentCount} התגובות`}</button>` : ''}
@@ -1092,9 +1096,12 @@ function renderStory() {
     <div class="sv-top"><button class="sv-u" data-a="story-user" data-v="${esc(uid)}">${avatar(u, 34)}<b>${esc(nameOf(u))}</b><span>${ago(s.createdAt)}</span></button>${uid === me() ? `<button class="icon-btn" data-a="story-del" aria-label="מחיקת הסטורי" style="color:#fff">${icon('trash', 22)}</button>` : ''}<button class="icon-btn" data-a="story-close" aria-label="סגירה" style="color:#fff">${icon('xmark', 24)}</button></div>
     <img class="sv-img" src="${s.image}" alt="">
     ${s.text ? `<div class="sv-text" dir="auto">${esc(s.text)}</div>` : ''}
-    ${uid === me() ? `<div class="sv-seen">${icon('people', 16)} ${(s.seen || []).length} צפו</div>` : ''}
+    ${uid === me() ? `<div class="sv-seen">${icon('people', 16)} ${(s.seen || []).length} צפו</div>` : `<div class="sv-reply"><div class="sv-reacts">${['❤️', '😂', '😮', '😢', '🔥', '👏'].map(e => `<button data-a="story-react" data-v="${e}" aria-label="תגובה ${e}">${e}</button>`).join('')}</div><form id="sv-form" class="sv-in"><input dir="auto" maxlength="300" placeholder="שליחת הודעה ל${esc(first(nameOf(u)))}…" aria-label="תשובה לסטורי" autocomplete="off"><button aria-label="שליחה">${icon('send', 20)}</button></form></div>`}
     <button class="sv-prev" data-a="story-step" data-v="-1" aria-label="הקודם"></button><button class="sv-next" data-a="story-step" data-v="1" aria-label="הבא"></button>`;
   storyT = setTimeout(() => storyStep(1), 5000);
+  // typing a reply holds the story on screen
+  const inp = el.querySelector('#sv-form input');
+  if (inp) { inp.onfocus = () => { clearTimeout(storyT); el.classList.add('hold'); }; inp.onblur = () => { el.classList.remove('hold'); if (!inp.value) { clearTimeout(storyT); storyT = setTimeout(() => storyStep(1), 4000); } }; }
 }
 function storyStep(d) {
   const st = S.story; if (!st) return;
@@ -1119,7 +1126,7 @@ function viewVideos() {
     : f === 'popular' ? all.slice().sort((a, b) => ((b.views || 0) + 4 * (b.likes || []).length) - ((a.views || 0) + 4 * (a.likes || []).length))
     : f === 'mine' ? all.filter(p => p.authorId === me()) : all;
   return bar({ title: 'סרטונים', trail: `<button class="nb-btn" data-a="new-video" aria-label="העלאת סרטון">${icon('plusSq', 24)}</button>` }) +
-  `<div class="chips">${[['all', 'הכל'], ['friends', 'מהחברים'], ['popular', 'פופולרי'], ['mine', 'שלי']].map(([k, l]) => `<button class="chip${k === f ? ' on' : ''}" data-a="vfilter" data-v="${k}">${l}</button>`).join('')}</div>` +
+  `<div class="chips"><button class="chip shorts-chip" data-a="shorts">${icon('play', 14)} שורטס</button>${[['all', 'הכל'], ['friends', 'מהחברים'], ['popular', 'פופולרי'], ['mine', 'שלי']].map(([k, l]) => `<button class="chip${k === f ? ' on' : ''}" data-a="vfilter" data-v="${k}">${l}</button>`).join('')}</div>` +
   (list.length ? `<div class="yt-list">${list.map(p => videoCard(p)).join('')}</div>`
     : `<div class="empty">${icon('playRect', 56, 1.4)}<b>${f === 'mine' ? 'עוד לא העלית סרטונים' : 'עוד אין סרטונים'}</b><span>סרטון של עד דקה, עם כותרת ותיאור. כולם יכולים לצפות ולעשות לייק.</span><button class="btn filled sm" data-a="new-video">העלאת סרטון</button></div>`);
 }
@@ -1144,7 +1151,7 @@ function viewWatch() {
   `<div class="yt-player" style="aspect-ratio:${p.video.w && p.video.h ? Math.max(.56, Math.min(1.78, p.video.w / p.video.h)) : 1.78}">${src ? `<video data-keep="v-${esc(p.video.id)}" src="${src}" controls autoplay playsinline></video>` : `<img src="${p.video.thumb}" alt=""><div class="spinner"></div>`}</div>
   <div class="yt-info"><h2 dir="auto">${esc(p.title || 'סרטון')}</h2><span class="sub">${views(p.views)} · ${ago(p.createdAt)}</span>
     <div class="yt-ch"><button class="yt-chn" data-a="user" data-v="${esc(p.authorId)}">${avatar(a, 40)}<span><b>${esc(nameOf(a))}</b><span>${esc(uname(a))}</span></span></button>${followBtn(p.authorId)}</div>
-    <div class="yt-acts"><button class="pill-btn${liked ? ' on' : ''}" data-a="like" data-v="${esc(p.id)}" aria-pressed="${liked}">${icon(liked ? 'heartF' : 'heart', 18)} ${likes.length || 'לייק'}</button><button class="pill-btn" data-a="comments" data-v="${esc(p.id)}">${icon('comment', 18)} ${p.commentCount || 'תגובות'}</button><button class="pill-btn" data-a="share-post" data-v="${esc(p.id)}">${icon('send', 17)} שליחה</button>${p.authorId === me() ? `<button class="pill-btn" data-a="post-menu" data-v="${esc(p.id)}" aria-label="מחיקה">${icon('trash', 18)}</button>` : ''}</div>
+    <div class="yt-acts"><button class="pill-btn${liked ? ' on' : ''}" data-a="like" data-v="${esc(p.id)}" aria-pressed="${liked}">${icon(liked ? 'heartF' : 'heart', 18)} ${likes.length || 'לייק'}</button><button class="pill-btn" data-a="comments" data-v="${esc(p.id)}">${icon('comment', 18)} ${p.commentCount || 'תגובות'}</button><button class="pill-btn" data-a="share-post" data-v="${esc(p.id)}">${icon('send', 17)} שליחה</button><button class="pill-btn${isSaved(p.id) ? ' on' : ''}" data-a="save" data-v="${esc(p.id)}">${icon(isSaved(p.id) ? 'bookmarkF' : 'bookmark', 17)} ${isSaved(p.id) ? 'נשמר' : 'שמירה'}</button>${p.authorId === me() ? `<button class="pill-btn" data-a="post-menu" data-v="${esc(p.id)}" aria-label="מחיקה">${icon('trash', 18)}</button>` : ''}</div>
     ${p.text ? `<div class="yt-desc" dir="auto">${linkify(p.text)}</div>` : ''}</div>
   ${more.length ? `<div class="section-h">עוד סרטונים</div><div class="yt-list">${more.map(x => videoCard(x)).join('')}</div>` : ''}`;
 }
@@ -1168,8 +1175,8 @@ function viewProfilePage(uid, isRoot) {
     <div class="pf-btns">${mine ? `<button class="btn tinted sm grow" data-a="edit-profile">עריכת פרופיל</button><button class="btn tinted sm grow" data-a="share-profile">שיתוף פרופיל</button>`
       : `${followBtn(uid, true)}<button class="btn tinted sm grow" data-a="dm" data-v="${esc(uid)}">הודעה</button><button class="btn tinted sm" data-a="call-user" data-v="${esc(uid)}" data-k="audio" aria-label="שיחה קולית">${icon('phone', 18)}</button><button class="btn tinted sm" data-a="call-user" data-v="${esc(uid)}" data-k="video" aria-label="שיחת וידאו">${icon('video', 19)}</button>`}</div>
   </div>
-  <div class="seg pf-seg" role="tablist"><button data-a="ptab" data-v="photos" class="${tab === 'photos' ? 'on' : ''}">${icon('grid', 17)} תמונות</button><button data-a="ptab" data-v="videos" class="${tab === 'videos' ? 'on' : ''}">${icon('playRect', 18)} סרטונים</button></div>
-  ${tab === 'photos'
+  <div class="seg pf-seg" role="tablist"><button data-a="ptab" data-v="photos" class="${tab === 'photos' ? 'on' : ''}">${icon('grid', 17)} תמונות</button><button data-a="ptab" data-v="videos" class="${tab === 'videos' ? 'on' : ''}">${icon('playRect', 18)} סרטונים</button>${mine ? `<button data-a="ptab" data-v="saved" class="${tab === 'saved' ? 'on' : ''}">${icon('bookmark', 17)} שמורים</button>` : ''}</div>
+  ${tab === 'saved' && mine ? savedGrid() : tab === 'photos'
     ? (photos.length ? `<div class="pgrid">${photos.map(p => `<button class="pg" data-a="open-post" data-v="${esc(p.id)}" aria-label="פוסט"><img src="${p.thumb}" alt="">${(p.likes || []).length ? `<span class="pg-l">${icon('heartF', 12)} ${p.likes.length}</span>` : ''}</button>`).join('')}</div>` : `<div class="empty"><b>אין עדיין תמונות</b>${mine ? '<button class="btn filled sm" data-a="new-photo">פוסט ראשון</button>' : ''}</div>`)
     : (vids.length ? `<div class="yt-grid">${vids.map(p => videoCard(p, true)).join('')}</div>` : `<div class="empty"><b>אין עדיין סרטונים</b>${mine ? '<button class="btn filled sm" data-a="new-video">העלאת סרטון</button>' : ''}</div>`)}`;
 }
@@ -1207,7 +1214,7 @@ async function toggleFollow(uid, on) {
   S.user.following = on ? [...new Set(following().concat(uid))] : following().filter(x => x !== uid);
   if (S.fcount[uid] != null) S.fcount[uid] += on ? 1 : -1;
   softRender();
-  try { await be.follow(uid, on); } catch (e) { fail(e); }
+  try { await be.follow(uid, on); if (on) sendNotif(uid, { type: 'follow' }); } catch (e) { fail(e); }
 }
 function searchSheet() {
   const fs = formSheet({ title: 'חיפוש חברים', tall: true,
@@ -1220,8 +1227,9 @@ function searchSheet() {
       const l = (await be.searchUsers(q)).filter(u => u.id !== me());
       if (my !== n) return;
       l.forEach(u => { S.members[u.id] = Object.assign({}, S.members[u.id], u); });
-      res.innerHTML = l.length ? `${q ? '' : '<div class="section-h">אנשים ב-Friends</div>'}<div class="list av">${l.map(personRow).join('')}</div>` : `<div class="empty" style="padding:30px 0"><b>${q ? 'לא נמצא אף אחד' : 'עוד אין אנשים'}</b><span>${q ? 'נסו את שם המשתמש בלי @' : 'הזמינו חברים להצטרף ל-Friends'}</span></div>`;
+      res.innerHTML = (l.length ? `${q ? '' : '<div class="section-h">אנשים ב-Friends</div>'}<div class="list av">${l.map(personRow).join('')}</div>` : `<div class="empty" style="padding:30px 0"><b>${q ? 'לא נמצא אף אחד' : 'עוד אין אנשים'}</b><span>${q ? 'נסו את שם המשתמש בלי @' : 'הזמינו חברים להצטרף ל-Friends'}</span></div>`) + (q ? '' : exploreGrid());
       wirePeople(res);
+      res.querySelectorAll('[data-open-post]').forEach(b => b.onclick = () => { const id = b.dataset.openPost; if (closeForm) closeForm(); setTimeout(() => openPost(id), 350); });
     } catch (e) { res.innerHTML = '<div class="empty"><b>החיפוש לא הצליח</b></div>'; }
   };
   inp.addEventListener('input', () => { clearTimeout(t); t = setTimeout(run, 250); });
@@ -1501,6 +1509,7 @@ Object.assign(A, {
     const p = postById(b.dataset.v); if (!p) return;
     const on = !(p.likes || []).includes(me()); haptic(on ? 10 : 4);
     p.likes = on ? (p.likes || []).concat(me()) : p.likes.filter(x => x !== me()); render();
+    if (on) sendNotif(p.authorId, { type: p.kind === 'video' ? 'vlike' : 'like', pid: p.id });
     try { await be.likePost(p, on); } catch (e) { fail(e); }
   },
   'dbl-like': b => {
@@ -1545,7 +1554,7 @@ Object.assign(A, {
 });
 Object.assign(F, {
   'uname-form': async () => { if (await saveUsername($('#un-in').value)) { S.anim = 'fade'; render(true); } },
-  'cmt-form': async f => { const el = f.querySelector('#cmt-in'), t = el.value.trim(); if (!t || !S.comments) return; el.value = ''; grow(el); try { await be.addPostComment(S.comments.pid, t); } catch (e) { el.value = t; fail(e); } }
+  'cmt-form': async f => { const el = f.querySelector('#cmt-in'), t = el.value.trim(); if (!t || !S.comments) return; el.value = ''; grow(el); try { await be.addPostComment(S.comments.pid, t); const p = postById(S.comments.pid); if (p) sendNotif(p.authorId, { type: 'comment', pid: p.id, text: t.slice(0, 80) }); } catch (e) { el.value = t; fail(e); } }
 });
 
 document.addEventListener('click', e => { const b = e.target.closest('[data-a]'); if (b && A[b.dataset.a]) { e.preventDefault(); A[b.dataset.a](b); } });
@@ -1898,6 +1907,144 @@ Object.assign(F, {
   'evc-form': async () => { const el = $('#evc-in'), t = el.value.trim(), p = evPage(); if (!t || !p) return; el.value = ''; try { await be.addEventComment(p.id, t); } catch (e) { el.value = t; fail(e); } }
 });
 
+
+/* ====================== Activity, shorts, saved, story replies, explore ====================== */
+
+/* ---------- activity: likes, comments and follows from others ---------- */
+let notifsLoaded = false;
+const notifSeen = () => LS.get('friends.notifSeen') || 0;
+const unreadNotifs = () => (S.notifs || []).filter(n => n.createdAt > notifSeen()).length;
+function watchNotifs() {
+  notifsLoaded = false;
+  unsub.notifs = be.watchNotifs(async list => {
+    const prev = new Set((S.notifs || []).map(n => n.id));
+    S.notifs = list;
+    await loadUsers(list.map(n => n.from));
+    if (notifsLoaded) list.filter(n => !prev.has(n.id)).slice(0, 1).forEach(n => { if (S.screen !== 'activity') { hud(notifText(n, true)); if (document.hidden) notify('Friends', notifText(n, true), 'n:' + n.id); } });
+    notifsLoaded = true; softRender();
+  }, () => {});
+}
+function notifText(n, plain) {
+  const who = plain ? nameOf(S.members[n.from]) : `<b>${esc(nameOf(S.members[n.from]))}</b>`;
+  const t = { like: 'עשה/תה לייק לפוסט שלך', vlike: 'עשה/תה לייק לסרטון שלך', comment: 'הגיב/ה', follow: 'התחיל/ה לעקוב אחריך', story: 'הגיב/ה לסטורי שלך' }[n.type] || '';
+  return `${who} ${t}${n.text ? (plain ? ': ' : ': ') + (plain ? n.text : `<span dir="auto">${esc(n.text)}</span>`) : ''}`;
+}
+function sendNotif(to, n) { if (!to || to === me() || local()) return; be.sendNotif(to, n).catch(() => {}); }
+function viewActivity() {
+  const l = S.notifs || [], seen = notifSeen();
+  setTimeout(() => { if (l[0] && l[0].createdAt > notifSeen()) { LS.set('friends.notifSeen', l[0].createdAt); } }, 800);
+  return bar({ inline: true, back: 'בית', title: 'פעילות' }) +
+  (l.length ? `<div class="list av">${l.map(n => {
+    const u = S.members[n.from] || { id: n.from }, p = n.pid && postById(n.pid);
+    const thumb = p ? `<img class="nt-th" src="${p.kind === 'video' && p.video ? p.video.thumb : p.thumb}" alt="">` : '';
+    const end = n.type === 'follow' ? (isFollowing(n.from) ? '' : `<button class="btn filled sm" data-a="follow" data-v="${esc(n.from)}">מעקב בחזרה</button>`) : thumb;
+    return `<div class="row nt${n.createdAt > seen ? ' new' : ''}"><button data-a="user" data-v="${esc(n.from)}" aria-label="${esc(nameOf(u))}">${avatar(u, 44)}</button><button class="body nt-b" ${p ? `data-a="open-post" data-v="${esc(p.id)}"` : `data-a="user" data-v="${esc(n.from)}"`}><span class="nt-t">${notifText(n)}</span><span class="sub">${ago(n.createdAt)}</span></button>${end}</div>`;
+  }).join('')}</div>`
+  : `<div class="empty">${icon('bell', 56, 1.4)}<b>עוד אין פעילות</b><span>כשמישהו יעשה לייק, יגיב או יתחיל לעקוב אחריך, זה יופיע כאן.</span></div>`);
+}
+
+/* ---------- shorts: full-screen videos, swipe up for the next one ---------- */
+let shortsObs = null;
+function openShorts(startId) {
+  const list = (S.shortsList = S.posts.filter(p => p.kind === 'video' && p.video));
+  if (!list.length) { hud('עוד אין סרטונים', true); return; }
+  closeShorts(true);
+  const el = document.createElement('div'); el.id = 'shorts'; el.className = 'shorts'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'שורטס');
+  el.innerHTML = `<button class="sh-close" data-a="shorts-close" aria-label="סגירה">${icon('xmark', 26)}</button><div class="sh-feed">${list.map(shortSlide).join('')}</div>`;
+  phoneEl.appendChild(el);
+  shortsObs = new IntersectionObserver(es => es.forEach(e => {
+    const v = e.target.querySelector('video');
+    if (e.isIntersecting && e.intersectionRatio > .6) playShort(e.target); else if (v) v.pause();
+  }), { root: el.querySelector('.sh-feed'), threshold: [0, .6, 1] });
+  el.querySelectorAll('.sh-slide').forEach(s => shortsObs.observe(s));
+  try { history.pushState(Object.assign({}, history.state, { shorts: 1 }), ''); } catch (e) {}
+  if (startId) { const s = el.querySelector(`[data-sid="${CSS.escape(startId)}"]`); if (s) s.scrollIntoView(); }
+}
+function shortSlide(p) {
+  const a = S.members[p.authorId] || { id: p.authorId }, liked = (p.likes || []).includes(me()), saved = isSaved(p.id);
+  return `<section class="sh-slide" data-sid="${esc(p.id)}"><img class="sh-poster" src="${p.video.thumb}" alt=""><video playsinline loop preload="none"></video><div class="sh-tap" data-a="shorts-tap"></div>
+    <div class="sh-side"><button data-a="sh-like" data-v="${esc(p.id)}" class="${liked ? 'on' : ''}" aria-label="לייק">${icon(liked ? 'heartF' : 'heart', 30)}<span>${(p.likes || []).length || ''}</span></button>
+      <button data-a="sh-comments" data-v="${esc(p.id)}" aria-label="תגובות">${icon('comment', 30)}<span>${p.commentCount || ''}</span></button>
+      <button data-a="sh-save" data-v="${esc(p.id)}" class="${saved ? 'on' : ''}" aria-label="שמירה">${icon(saved ? 'bookmarkF' : 'bookmark', 28)}</button>
+      <button data-a="share-post" data-v="${esc(p.id)}" aria-label="שליחה">${icon('send', 27)}</button></div>
+    <div class="sh-meta"><button class="sh-u" data-a="sh-user" data-v="${esc(p.authorId)}">${avatar(a, 34)}<b>${esc(nameOf(a))}</b></button><b class="sh-title" dir="auto">${esc(p.title || '')}</b>${p.text ? `<span dir="auto">${esc(p.text.slice(0, 120))}</span>` : ''}</div></section>`;
+}
+async function playShort(slide) {
+  const p = postById(slide.dataset.sid), v = slide.querySelector('video'); if (!p || !v) return;
+  if (!S.viewed) S.viewed = new Set();
+  if (!S.viewed.has(p.id)) { S.viewed.add(p.id); be.viewPost(p.id); }
+  if (!v.src) {
+    slide.classList.add('loading');
+    try { if (!vcache[p.video.id]) vcache[p.video.id] = await dataURLToObjectURL(await be.loadPostVideo(p.video)); v.src = vcache[p.video.id]; }
+    catch (e) { hud('לא הצלחנו לטעון את הסרטון', true); return; } finally { slide.classList.remove('loading'); }
+  }
+  const r = slide.getBoundingClientRect(), box = $('#shorts .sh-feed'); if (!box) return;
+  const br = box.getBoundingClientRect(); if (Math.abs(r.top - br.top) > r.height * .4) return;
+  $$('#shorts video').forEach(x => { if (x !== v) x.pause(); });
+  slide.classList.add('ready'); v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
+}
+function closeShorts(silent) {
+  if (shortsObs) { shortsObs.disconnect(); shortsObs = null; }
+  const el = $('#shorts'); if (el) { el.querySelectorAll('video').forEach(v => v.pause()); el.remove(); }
+  if (!silent) softRender();
+}
+
+/* ---------- saved posts ---------- */
+const isSaved = pid => ((S.user && S.user.saved) || []).includes(pid);
+async function toggleSave(pid) {
+  if (local()) { hud('שמירה עובדת באתר, אחרי כניסה עם Google', true); return false; }
+  const on = !isSaved(pid); haptic(8);
+  S.user.saved = on ? [...new Set(((S.user.saved) || []).concat(pid))] : S.user.saved.filter(x => x !== pid);
+  hud(on ? 'נשמר בשמורים' : 'הוסר מהשמורים');
+  try { await be.savePost(pid, on); } catch (e) { fail(e); }
+  return on;
+}
+function savedGrid() {
+  const l = ((S.user && S.user.saved) || []).map(postById).filter(Boolean).reverse();
+  if (!l.length) return `<div class="empty">${icon('bookmark', 48, 1.4)}<b>אין עדיין שמורים</b><span>לחצו על הסימנייה בפוסט או בסרטון כדי לשמור אותו כאן. רק את/ה רואה את הרשימה.</span></div>`;
+  return `<div class="pgrid">${l.map(p => `<button class="pg" data-a="open-post" data-v="${esc(p.id)}" aria-label="פוסט שמור"><img src="${p.kind === 'video' ? p.video.thumb : p.thumb}" alt="">${p.kind === 'video' ? `<span class="pg-l">${icon('play', 12)} ${fmtDur(p.video.dur || 0)}</span>` : ''}</button>`).join('')}</div>`;
+}
+
+/* ---------- replies to stories go to the private chat ---------- */
+async function storyReply(text) {
+  const st = S.story; if (!st) return; const uid = st.order[st.u], s = (st.by[uid] || [])[st.i]; if (!s || uid === me()) return;
+  if (local()) { hud('תגובות לסטורי עובדות באתר, אחרי כניסה עם Google', true); return; }
+  try {
+    const cid = await be.openChat(uid), img = await tinyImage(s.image, 360);
+    await be.sendMessage({ t: 'c', id: cid }, { image: img, text: `הגיב/ה לסטורי שלך: ${text}` });
+    sendNotif(uid, { type: 'story', text: text.slice(0, 80) });
+    haptic(12); hud('נשלח');
+  } catch (e) { fail(e); }
+}
+
+/* ---------- explore: photos from people you don't follow yet ---------- */
+function exploreGrid() {
+  const l = S.posts.filter(p => p.authorId !== me() && !isFollowing(p.authorId) && (p.kind === 'photo' || p.video)).slice(0, 24);
+  if (!l.length) return '';
+  return `<div class="section-h">גלו</div><div class="pgrid">${l.map(p => `<button class="pg" data-open-post="${esc(p.id)}" aria-label="פוסט"><img src="${p.kind === 'video' ? p.video.thumb : p.thumb}" alt="">${p.kind === 'video' ? `<span class="pg-l">${icon('play', 12)}</span>` : ''}</button>`).join('')}</div>`;
+}
+
+Object.assign(A, {
+  activity: () => go('activity'),
+  shorts: b => openShorts(b && b.dataset ? b.dataset.v : null),
+  'shorts-close': () => { if (history.state && history.state.shorts) history.back(); else closeShorts(); },
+  'shorts-tap': b => { const v = b.parentElement.querySelector('video'); if (!v || !v.src) return; if (v.paused) v.play().catch(() => {}); else v.pause(); },
+  'sh-like': async b => {
+    const p = postById(b.dataset.v); if (!p) return; const on = !(p.likes || []).includes(me());
+    p.likes = on ? (p.likes || []).concat(me()) : p.likes.filter(x => x !== me());
+    b.classList.toggle('on', on); b.innerHTML = `${icon(on ? 'heartF' : 'heart', 30)}<span>${p.likes.length || ''}</span>`; haptic(on ? 10 : 4);
+    if (on) sendNotif(p.authorId, { type: 'vlike', pid: p.id });
+    try { await be.likePost(p, on); } catch (e) { fail(e); }
+  },
+  'sh-comments': b => openComments(b.dataset.v),
+  'sh-save': async b => { await toggleSave(b.dataset.v); const on = isSaved(b.dataset.v); b.classList.toggle('on', on); b.innerHTML = icon(on ? 'bookmarkF' : 'bookmark', 28); },
+  'sh-user': b => { closeShorts(true); openUser(b.dataset.v); },
+  save: async b => { await toggleSave(b.dataset.v); render(); },
+  'story-react': b => { const e = b.dataset.v; storyReply(e); const el = b.closest('.story-v'); if (el) { const f = document.createElement('span'); f.className = 'sv-float'; f.textContent = e; el.appendChild(f); setTimeout(() => f.remove(), 1200); } }
+});
+Object.assign(F, {
+  'sv-form': async f => { const inp = f.querySelector('input'), t = inp.value.trim(); if (!t) return; inp.value = ''; inp.blur(); await storyReply(t); renderStory(); }
+});
 
 /* ---------- boot ---------- */
 async function boot() {

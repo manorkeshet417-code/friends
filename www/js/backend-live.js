@@ -120,6 +120,11 @@ export async function LiveBackend(cfg) {
     seeStory(id) { return updateDoc(doc(db, P + 'stories', id), { seen: arrayUnion(me.id) }).catch(() => {}); },
     deleteStory(id) { const b = writeBatch(db); b.delete(doc(db, P + 'stories', id)); return b.commit(); },
 
+    /* activity: likes, comments and follows land in the other person's notifs */
+    sendNotif(to, n) { return addDoc(collection(db, P + 'users', to, 'notifs'), Object.assign({ from: me.id, createdAt: serverTimestamp() }, n)); },
+    watchNotifs(cb, err) { return onSnapshot(query(collection(db, P + 'users', me.id, 'notifs'), orderBy('createdAt', 'desc'), limit(80)), s => cb(s.docs.map(read)), err); },
+    savePost(pid, on) { me.saved = on ? [...new Set((me.saved || []).concat(pid))] : (me.saved || []).filter(x => x !== pid); return updateDoc(doc(db, P + 'users', me.id), { saved: on ? arrayUnion(pid) : arrayRemove(pid) }); },
+
     /* event pages: public pages, built by their creator; votes and comments from everyone */
     watchEventPages(cb, err) { return onSnapshot(query(collection(db, P + 'eventPages'), orderBy('createdAt', 'desc'), limit(100)), s => cb(s.docs.map(read)), err); },
     watchEventPage(eid, cb, err) { return onSnapshot(doc(db, P + 'eventPages', eid), s => cb(s.exists() ? read(s) : null), err); },

@@ -56,6 +56,9 @@ export function LocalBackend() {
     async seeStory() {},
     async deleteStory(sid) { const i = stories.findIndex(s => s.id === sid); if (i >= 0) stories.splice(i, 1); emit('stories'); },
 
+    watchNotifs(cb) { cb([]); return () => {}; },
+    async sendNotif() {},
+    async savePost() {},
     watchEventPages(cb) { return on('evs', () => cb(copy(Object.values(evs).sort((a, b) => b.createdAt - a.createdAt)))); },
     watchEventPage(eid, cb) { return on('ev:' + eid, () => cb(evs[eid] ? copy(evs[eid]) : null)); },
     watchEventSub(eid, sub, cb) { return on('ev:' + eid + ':' + sub, () => cb(copy((evsub[eid + ':' + sub] || [])))); },
