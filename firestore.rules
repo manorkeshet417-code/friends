@@ -232,6 +232,11 @@ service cloud.firestore {
     }
 
     // Profiles. A username must be the one this person holds in /usernames.
+    // Friends push: each phone's notification token. Only its owner reads or writes it; the push sender reads it as the project owner.
+    match /fr_push/{uid} {
+      allow read, write: if signedIn() && me() == uid;
+    }
+
     match /fr_users/{uid} {
       allow read: if signedIn();
       allow write: if signedIn() && me() == uid

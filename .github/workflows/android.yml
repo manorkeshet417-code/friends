@@ -5,7 +5,7 @@ name: Build Android app
 on:
   push:
     branches: [main]
-    paths: ['package.json', 'capacitor.config.json', 'shell/**', 'assets/**', '.github/workflows/android.yml']
+    paths: ['package.json', 'capacitor.config.json', 'shell/**', 'assets/**', 'android-config/**', '.github/workflows/android.yml']
   workflow_dispatch:
 
 permissions:
@@ -33,6 +33,8 @@ jobs:
       - name: Create the Android project
         run: |
           npx cap add android
+          # Firebase Cloud Messaging (notifications while Friends is closed) needs the Android app's Firebase config
+          cp android-config/google-services.json android/app/google-services.json
           npx @capacitor/assets generate --android --splashBackgroundColor '#0a84ff' --splashBackgroundColorDark '#000000' || echo "::warning::icon generation failed, using the default icon"
           npx cap sync android
 

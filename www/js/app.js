@@ -2,7 +2,7 @@
 import { $, $$, esc, haptic, LS, linkify, MONTHS, DAYS, iso, dayKey, hhmm, fmtDur, ago, listTime, dayLabel, daysTo, nextBirthday,
   COLORS, EMOJIS, REACTIONS, first, nameOf, userColor, chatId, avatar, gtile, prepImage, chatImage, blobToDataURL, recorderMime, icon,
   EMOJI_SETS, isJumbo, prepVideo, dataURLToObjectURL, questionFor, VIDEO_MAX_SEC, mediaHelp, inAppBrowser, isNative } from './util.js';
-import { FIREBASE_CONFIG } from './config.js';
+import { FIREBASE_CONFIG, PUSH_URL } from './config.js';
 import { LiveBackend } from './backend-live.js';
 import { LocalBackend } from './backend-local.js';
 import { CallManager } from './calls.js';
@@ -411,7 +411,7 @@ function sentTyping() { if (Date.now() - typedAt > 3000) { typedAt = Date.now();
 async function send(m) {
   const sc = scope();
   if (S.reply) { m.replyTo = { id: S.reply.id, authorId: S.reply.authorId, text: S.reply.text }; S.reply = null; }
-  try { await be.sendMessage(sc, m); haptic(6); if (sc.t === 'g') markGroupChatSeen(); }
+  try { await be.sendMessage(sc, m); haptic(6); pushMsg(sc, m); if (sc.t === 'g') markGroupChatSeen(); }
   catch (e) { if (e && e.code === 'local') hud('זמין באתר, אחרי כניסה עם Google', true); else fail(e); throw e; }
   finally { render(); }
 }
@@ -559,6 +559,7 @@ async function startCall(uid, kind) {
   try {
     await be.openChat(uid); await loadUsers([uid]);
     await calls.start(uid, kind);
+    pushOut({ kind: 'call', cid: chatId(me(), uid), title: nameOf(S.members[me()]), body: kind === 'video' ? '📹 שיחת וידאו נכנסת' : '📞 שיחה נכנסת' });
   }
   catch (e) { fail(e); }
 }
@@ -898,7 +899,7 @@ const A = {
   'new-code': async () => { const g = group(); if (await confirmSheet({ title: 'להחליף את קוד ההזמנה?', msg: 'הקישור הישן יפסיק לעבוד.', actions: [{ label: 'החלפת הקוד' }] }) === 0) { try { await be.newInviteCode(g); hud('קוד חדש נוצר'); } catch (e) { fail(e); } } },
   'delete-group': async () => { const g = group(); if (await confirmSheet({ title: `למחוק את "${g.name}"?`, msg: 'הקבוצה תיעלם לכל החברים, עם הפיד, הצ׳אט, האירועים, האלבום והרשימות. אי אפשר לבטל.', actions: [{ label: 'מחיקת הקבוצה', destructive: true }] }) === 0) { try { await be.deleteGroup(g); go('root'); hud('הקבוצה נמחקה'); } catch (e) { fail(e); } } },
   'leave-group': async () => { const g = group(); if (await confirmSheet({ title: `לצאת מ"${g.name}"?`, msg: 'כדי לחזור תצטרכו קוד הזמנה חדש.', actions: [{ label: 'יציאה מהקבוצה', destructive: true }] }) === 0) { try { await be.leaveGroup(g.id); go('root'); hud('יצאת מהקבוצה'); } catch (e) { fail(e); } } },
-  'sign-out': async () => { if (await confirmSheet({ title: 'להתנתק?', msg: be.mode === 'live' ? 'הקבוצות והשיחות שלך נשארות. אפשר להיכנס שוב עם Google.' : 'בתצוגה המקדימה הכול יתחיל מחדש.', actions: [{ label: 'התנתקות' }] }) === 0) { stopAll(); await be.signOut(); } },
+  'sign-out': async () => { if (await confirmSheet({ title: 'להתנתק?', msg: be.mode === 'live' ? 'הקבוצות והשיחות שלך נשארות. אפשר להיכנס שוב עם Google.' : 'בתצוגה המקדימה הכול יתחיל מחדש.', actions: [{ label: 'התנתקות' }] }) === 0) { stopAll(); if (pushToken && be.dropPushToken) await be.dropPushToken(pushToken); pushReady = false; pushToken = ''; await be.signOut(); } },
   'media-check': async () => {
     if (inAppBrowser()) { showMediaHelp(null, 'video'); return; }
     let mic = false;
@@ -1933,7 +1934,13 @@ function notifText(n, plain) {
   const t = { like: 'עשה/תה לייק לפוסט שלך', vlike: 'עשה/תה לייק לסרטון שלך', comment: 'הגיב/ה', follow: 'התחיל/ה לעקוב אחריך', story: 'הגיב/ה לסטורי שלך' }[n.type] || '';
   return `${who} ${t}${n.text ? (plain ? ': ' : ': ') + (plain ? n.text : `<span dir="auto">${esc(n.text)}</span>`) : ''}`;
 }
-function sendNotif(to, n) { if (!to || to === me() || local()) return; be.sendNotif(to, n).catch(() => {}); }
+function sendNotif(to, n) {
+  if (!to || to === me() || local()) return;
+  be.sendNotif(to, n).catch(() => {});
+  // the push sender titles it with the sender's real name, so the body leaves the name out
+  const who = nameOf(S.members[me()]);
+  pushOut({ kind: 'activity', to, body: notifText(Object.assign({}, n, { from: me() }), true).slice(who.length + 1) });
+}
 function viewActivity() {
   const l = S.notifs || [], seen = notifSeen();
   setTimeout(() => { if (l[0] && l[0].createdAt > notifSeen()) { LS.set('friends.notifSeen', l[0].createdAt); } }, 800);
@@ -2115,10 +2122,56 @@ async function nativeLoginDone(tok) {
   if (!tok) return; S.nativeTok = tok; render(true);
   setTimeout(() => { location.href = 'friends://auth?gid=' + encodeURIComponent(tok); }, 300);
 }
+/* ---------- notifications while Friends is closed (free: Firebase Cloud Messaging, sent by a Google Apps Script) ---------- */
+let pushReady = false, pushToken = '';
+async function setupPush() {
+  if (!isNative() || pushReady || !S.user || be.mode !== 'live' || !be.savePushToken) return;
+  pushReady = true;
+  try {
+    const P = capPlugin('PushNotifications');
+    let st = await P.checkPermissions();
+    if (st.receive !== 'granted' && st.receive !== 'denied') st = await P.requestPermissions();
+    if (st.receive !== 'granted') { pushReady = false; return; }
+    await P.createChannel({ id: 'msgs', name: 'הודעות ועדכונים', importance: 4, visibility: 1, vibration: true }).catch(() => {});
+    await P.createChannel({ id: 'calls', name: 'שיחות נכנסות', importance: 5, visibility: 1, vibration: true }).catch(() => {});
+    await P.addListener('registration', t => { pushToken = t.value; be.savePushToken(t.value).catch(e => console.warn('push token', e)); });
+    await P.addListener('registrationError', e => console.warn('push', e));
+    // arrived while Friends is open: Android doesn't show it, so a banner does
+    await P.addListener('pushNotificationReceived', n => { const d = n.data || {}; if (d.kind === 'test' || !(d.cid && d.cid === S.cid) && !(d.gid && d.gid === S.gid)) hud(`${n.title || 'Friends'}: ${n.body || ''}`.slice(0, 80)); });
+    await P.addListener('pushNotificationActionPerformed', a => openFromPush((a.notification && a.notification.data) || {}));
+    await P.register();
+  } catch (e) { pushReady = false; console.warn('push', e); }
+}
+function openFromPush(d) {
+  if (!S.user) return;
+  if (d.cid) go('chat', { cid: d.cid });
+  else if (d.gid) go('group', { gid: d.gid });
+  else if (d.kind === 'activity') go('activity');
+}
+async function pushOut(o) {
+  if (!PUSH_URL || be.mode !== 'live' || !be.idToken) return;
+  try {
+    const idToken = await be.idToken(); if (!idToken) return;
+    // text/plain + no-cors: a "simple" request, so Apps Script needs no CORS setup
+    await fetch(PUSH_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(Object.assign({ idToken }, o)) });
+  } catch (e) { console.warn('push out', e); }
+}
+function pushMsg(sc, m) {
+  const p = m.text || (m.image ? '📷 תמונה' : m.video ? '🎬 סרטון' : m.audio ? '🎤 הודעה קולית' : m.share ? '🔗 פוסט' : 'הודעה חדשה');
+  const mine = nameOf(S.members[me()]);
+  if (sc.t === 'g') { const g = S.groups.find(x => x.id === sc.id); pushOut({ kind: 'msg', gid: sc.id, title: (g && g.name) || 'Friends', body: `${mine}: ${p}` }); }
+  else pushOut({ kind: 'msg', cid: sc.id, title: mine, body: p });
+}
+A['push-test'] = async () => {
+  await setupPush();
+  if (!pushToken) { permHelp('notif'); return; }
+  hud('נשלחה התראת בדיקה…'); pushOut({ kind: 'test', title: 'Friends', body: 'ההתראות עובדות 🎉 הן יגיעו גם כשהאפליקציה סגורה' });
+};
+
 A['native-login'] = async b => { b.disabled = true; try { await nativeLoginDone(await be.googleTokenViaPopup()); } catch (e) { if (!(e && /popup-closed|cancelled-popup/.test(e.code || ''))) fail(e); } finally { b.disabled = false; } };
 
 function browserSection() {
-  if (isNative()) return `<div class="section-h">הגדרות הטלפון</div><div class="list"><button class="row" data-a="app-settings">${icon('gear', 22)}<span class="body t">פתיחת הגדרות האפליקציה</span><span class="chev">${icon('chev', 16)}</span></button></div><p class="section-f">שם: "הרשאות" ← מיקרופון, מצלמה, התראות.</p>`;
+  if (isNative()) return `<div class="section-h">הגדרות הטלפון</div><div class="list"><button class="row" data-a="app-settings">${icon('gear', 22)}<span class="body t">פתיחת הגדרות האפליקציה</span><span class="chev">${icon('chev', 16)}</span></button>${PUSH_URL ? `<button class="row" data-a="push-test">${icon('bell', 22)}<span class="body t">בדיקת התראות</span><span class="chev">${icon('chev', 16)}</span></button>` : ''}</div><p class="section-f">שם: "הרשאות" ← מיקרופון, מצלמה, התראות.</p>`;
   return `<div class="section-h">פתיחה בדפדפן</div><div class="list">${browserLinks().map((l, i) => `<button class="row" data-a="open-browser" data-v="${i}">${icon('link', 22)}<span class="body t">${l.label}</span><span class="chev">${icon('chev', 16)}</span></button>`).join('')}<button class="row" data-a="copy-link">${icon('copy', 22)}<span class="body t">העתקת הקישור</span></button></div>
   <p class="section-f">${standalone() ? `פותח את ${APP_NAME} בדפדפן. שם, ליד הכתובת (🔒 או ⓘ) ← "הרשאות", רואים ומשנים כל הרשאה.` : inAppBrowser() ? 'את/ה עכשיו בתוך אפליקציה אחרת. בדפדפן אפשר להתקין, להיכנס עם Google ולהתקשר.' : 'בדפדפן, ליד הכתובת (🔒 או ⓘ) ← "הרשאות", רואים ומשנים כל הרשאה של האתר.'}</p>`;
 }
@@ -2212,6 +2265,7 @@ A['continue-as'] = () => { const u = S.pending; if (!u) return; LS.set('friends.
 function enter(u) {
   {
     S.members[u.id] = u; watchAll(); S.anim = 'fade'; render(true);
+    setTimeout(setupPush, 1500);
     // a shared post link (?p=…) opens that post once the feed has loaded
     const se = params.get('e'); if (se) setTimeout(() => go('event', { eid: se }), 300);
     if (params.has('ob') && !standalone()) setTimeout(() => hud('פתוח בדפדפן. הרשאות: 🔒 ליד הכתובת ← הרשאות'), 1200);

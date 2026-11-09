@@ -59,6 +59,10 @@ export async function LiveBackend(cfg) {
       catch (e) { if (e && (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment')) await Au.signInWithRedirect(auth, p); else throw e; }
     },
     signOut() { return Au.signOut(auth); },
+    idToken() { return auth.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(''); },
+    // this phone's Firebase Cloud Messaging token, so the push sender can reach it while Friends is closed
+    savePushToken(t) { return setDoc(doc(db, P + 'push', me.id), { tokens: arrayUnion(t), at: serverTimestamp() }, { merge: true }); },
+    dropPushToken(t) { return updateDoc(doc(db, P + 'push', me.id), { tokens: arrayRemove(t) }).catch(() => {}); },
     // The Android app can't show Google's sign-in page, so Chrome signs in and hands back a Google ID token
     async googleTokenViaPopup() {
       const p = new Au.GoogleAuthProvider(); p.setCustomParameters({ prompt: 'select_account' });

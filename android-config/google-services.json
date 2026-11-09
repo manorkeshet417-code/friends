@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "706079879278",
+    "project_id": "nest-family-d163e",
+    "storage_bucket": "nest-family-d163e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:706079879278:android:423d24c1f317493fcd767f",
+        "android_client_info": {
+          "package_name": "io.github.manorkeshet417.friends"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDkGS4U9-2hugToYYNvAEzUdMC6gXhjkAI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
