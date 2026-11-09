@@ -2191,9 +2191,7 @@ A['push-test'] = async () => {
   await setupPush();
   if (!pushToken) { permHelp('notif'); return; }
   // Android shows a notification only while Friends is in the background: the sender waits 10 seconds
-  await confirmSheet({ title: 'בדיקת התראות', msg: 'אחרי "הבנתי" יש לך 10 שניות:
-צאו מ-Friends (כפתור הבית או החלקה למעלה).
-תוך כמה שניות תגיע התראה אמיתית לטלפון.', actions: [{ label: 'הבנתי' }] });
+  await confirmSheet({ title: 'בדיקת התראות', msg: 'אחרי "הבנתי" יש לך 10 שניות:\nצאו מ-Friends (כפתור הבית או החלקה למעלה).\nתוך כמה שניות תגיע התראה אמיתית לטלפון.', actions: [{ label: 'הבנתי' }] });
   const r = await pushOut({ kind: 'test', delay: 10, title: 'Friends', body: 'ההתראות עובדות 🎉 הן יגיעו גם כשהאפליקציה סגורה' });
   if (r.ok && r.sent) hud('ההתראה נשלחה');
   else await confirmSheet({ title: 'ההתראה לא נשלחה', msg: `תשובת השרת: ${r.ok ? 'לא נמצא מכשיר רשום' : r.error}\nגרסת האתר: ${BUILD_TAG}`, actions: [{ label: 'הבנתי' }] });
