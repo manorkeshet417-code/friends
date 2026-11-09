@@ -1004,7 +1004,8 @@ function viewLogin() {
     <p class="section-f" style="text-align:center">נכנסים עם חשבון Google. אחר כך בוחרים שם משתמש.</p>`)
   : `<form id="local-login"><div class="section-h">איך קוראים לך?</div><div class="list"><div class="field"><input id="local-name" autocomplete="given-name" placeholder="השם שלך" aria-label="השם שלך" autofocus></div></div>
     <div class="btn-row"><button class="btn filled block">כניסה</button></div>
-    <p class="section-f" style="text-align:center">זו תצוגה מקדימה: הנתונים נשמרים רק בדף הזה. באתר נכנסים עם Google.</p></form>`}`;
+    <p class="section-f" style="text-align:center">זו תצוגה מקדימה: הנתונים נשמרים רק בדף הזה. באתר נכנסים עם Google.</p></form>`}
+  <div class="btn-row" style="justify-content:center"><button class="nb-btn" data-a="open-browser">${icon('link', 18)} פתיחה בדפדפן</button></div>`;
 }
 const GLOGO = '<svg width="22" height="22" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.2 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.9 6.1C12.4 13.7 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.7c4.3-4 6.9-9.9 6.9-17.1z"/><path fill="#FBBC05" d="M10.5 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C.9 16.6 0 20.2 0 24s.9 7.4 2.6 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.2-8.5 2.2-6.3 0-11.6-4.2-13.5-9.9l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>';
 function viewUsername() {
@@ -1175,6 +1176,7 @@ function viewProfilePage(uid, isRoot) {
     <div class="pf-name">${esc(nameOf(u))}</div>${u.bio ? `<div class="pf-bio" dir="auto">${linkify(u.bio)}</div>` : ''}
     <div class="pf-btns">${mine ? `<button class="btn tinted sm grow" data-a="edit-profile">עריכת פרופיל</button><button class="btn tinted sm grow" data-a="share-profile">שיתוף פרופיל</button>`
       : `${followBtn(uid, true)}<button class="btn tinted sm grow" data-a="dm" data-v="${esc(uid)}">הודעה</button><button class="btn tinted sm" data-a="call-user" data-v="${esc(uid)}" data-k="audio" aria-label="שיחה קולית">${icon('phone', 18)}</button><button class="btn tinted sm" data-a="call-user" data-v="${esc(uid)}" data-k="video" aria-label="שיחת וידאו">${icon('video', 19)}</button>`}</div>
+    ${mine ? `<div class="pf-btns"><button class="btn tinted sm grow" data-a="settings">${icon('shield', 16)} הרשאות</button><button class="btn tinted sm grow" data-a="open-browser">${icon('link', 16)} פתיחה בדפדפן</button></div>` : ''}
   </div>
   <div class="seg pf-seg" role="tablist"><button data-a="ptab" data-v="photos" class="${tab === 'photos' ? 'on' : ''}">${icon('grid', 17)} תמונות</button><button data-a="ptab" data-v="videos" class="${tab === 'videos' ? 'on' : ''}">${icon('playRect', 18)} סרטונים</button>${mine ? `<button data-a="ptab" data-v="saved" class="${tab === 'saved' ? 'on' : ''}">${icon('bookmark', 17)} שמורים</button>` : ''}</div>
   ${tab === 'saved' && mine ? savedGrid() : tab === 'photos'
