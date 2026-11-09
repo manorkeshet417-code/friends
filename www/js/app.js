@@ -799,7 +799,7 @@ function emojiSheet(targetId) {
 /* ---------- actions ---------- */
 const listOf = id => S.data.lists.find(l => l.id === id);
 const A = {
-  google: async b => { b.disabled = true; try { await be.signIn(); } catch (e) { if (!(e && (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request'))) fail(e); } finally { b.disabled = false; } },
+  google: async b => { b.disabled = true; LS.set('friends.joined', 1); try { await be.signIn(); if (!S.user) location.reload(); } catch (e) { if (!(e && (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request'))) fail(e); } finally { b.disabled = false; } },
   back,
   'root-tab': b => { if (S.tab === b.dataset.v) { scrollTo(0); return; } S.tab = b.dataset.v; if (S.tab === 'profile') refreshMediaPerm(); S.anim = 'fade'; try { history.replaceState({ screen: 'root', tab: S.tab }, ''); } catch (e) {} render(true); },
   gtab: b => {
@@ -985,12 +985,16 @@ function viewLogin() {
     <div class="feature"><span class="fi">${icon('hash', 30)}</span><div><b>צ׳אטים ושרתים</b><span>הודעות פרטיות, קבוצות, שרתים עם ערוצים ושיחות וידאו.</span></div></div>
     <div class="feature"><span class="fi">${icon('book', 30)}</span><div><b>קבוצת כיתה</b><span>מערכת שעות, שיעורי בית, מבחנים וטיימר ריכוז.</span></div></div>
   </div>
-  ${live ? `<div class="btn-row"><button class="btn filled block" data-a="google">המשך עם Google</button></div>
-    <p class="section-f" style="text-align:center">נכנסים עם חשבון Google. אחר כך בוחרים שם משתמש.</p>`
+  ${live ? (S.pending
+    ? `<div class="btn-row" style="flex-direction:column"><button class="gbtn" data-a="continue-as">${avatar(S.pending, 28)}<span>המשך כ-${esc(nameOf(S.pending))}</span></button><button class="gbtn alt" data-a="google">${GLOGO}<span>חשבון Google אחר</span></button></div>
+    <p class="section-f" style="text-align:center">כבר מחובר/ת עם Google במכשיר הזה. אפשר להמשיך או לבחור חשבון אחר.</p>`
+    : `<div class="btn-row"><button class="gbtn" data-a="google">${GLOGO}<span>התחברות עם Google</span></button></div>
+    <p class="section-f" style="text-align:center">נכנסים עם חשבון Google. אחר כך בוחרים שם משתמש.</p>`)
   : `<form id="local-login"><div class="section-h">איך קוראים לך?</div><div class="list"><div class="field"><input id="local-name" autocomplete="given-name" placeholder="השם שלך" aria-label="השם שלך" autofocus></div></div>
     <div class="btn-row"><button class="btn filled block">כניסה</button></div>
     <p class="section-f" style="text-align:center">זו תצוגה מקדימה: הנתונים נשמרים רק בדף הזה. באתר נכנסים עם Google.</p></form>`}`;
 }
+const GLOGO = '<svg width="22" height="22" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.2 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.9 6.1C12.4 13.7 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.7c4.3-4 6.9-9.9 6.9-17.1z"/><path fill="#FBBC05" d="M10.5 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C.9 16.6 0 20.2 0 24s.9 7.4 2.6 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.2-8.5 2.2-6.3 0-11.6-4.2-13.5-9.9l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>';
 function viewUsername() {
   return `<div class="onb" style="padding-top:40px"><div class="app-icon fr">${avatar(S.user, 72)}</div><h1>שלום ${esc(first(nameOf(S.user)))}!</h1><p class="lead">בחרו שם משתמש. כך החברים ימצאו אתכם.</p></div>
   <form id="uname-form"><div class="list"><div class="field"><span class="at" dir="ltr">@</span><input id="un-in" dir="ltr" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="20" placeholder="username" aria-label="שם משתמש" autofocus></div></div>
@@ -1604,13 +1608,21 @@ async function boot() {
   try { be = live ? await LiveBackend(FIREBASE_CONFIG) : LocalBackend(); }
   catch (e) { console.error(e); be = LocalBackend(); hud('לא הצלחנו להתחבר לשרת. בדקו את החיבור ונסו שוב.', true); }
   be.onAuth(u => {
-    S.booting = false; S.user = u;
+    S.booting = false; S.user = u; S.pending = null;
     if (!u) { stopAll(); S.screen = 'root'; S.tab = 'home'; S.anim = 'fade'; render(true); return; }
+    // already signed in to Google here (e.g. from Nest): ask once before using that account
+    if (be.mode === 'live' && !LS.get('friends.joined')) { S.pending = u; S.user = null; S.anim = 'fade'; render(true); return; }
+    enter(u);
+  });
+}
+A['continue-as'] = () => { const u = S.pending; if (!u) return; LS.set('friends.joined', 1); S.pending = null; S.user = u; enter(u); };
+function enter(u) {
+  {
     S.members[u.id] = u; watchAll(); S.anim = 'fade'; render(true);
     // a shared post link (?p=…) opens that post once the feed has loaded
     const sp = params.get('p'); if (sp) { let n = 0; const t = setInterval(() => { if (postById(sp) || ++n > 30) { clearInterval(t); if (postById(sp)) openPost(sp); } }, 500); }
     if (S.joinCode) { const c = S.joinCode; S.joinCode = ''; setTimeout(() => joinForm(c), 400); }
-  });
+  }
 }
 try { history.replaceState({ screen: 'root', tab: 'home' }, ''); } catch (e) {}
 boot();
