@@ -290,7 +290,9 @@ export const QUESTIONS = [
 export function questionFor(dateKey) { let h = 0; for (const c of dateKey) h = (h * 33 + c.charCodeAt(0)) | 0; return QUESTIONS[Math.abs(h) % QUESTIONS.length]; }
 
 /* ---------- camera & microphone: say exactly why access failed and how to fix it ---------- */
-export const inAppBrowser = () => /GSA\/|FBAN|FBAV|FB_IAB|Instagram|WhatsApp|Line\/|; wv\)/i.test(navigator.userAgent);
+// inside the Friends Android app (Capacitor) the page runs in a WebView too, but that one is ours and can do everything
+export const isNative = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+export const inAppBrowser = () => !isNative() && /GSA\/|FBAN|FBAV|FB_IAB|Instagram|WhatsApp|Line\/|; wv\)/i.test(navigator.userAgent);
 const iosDevice = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const installed = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 export function mediaHelp(err, kind) {

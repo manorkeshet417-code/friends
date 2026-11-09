@@ -1,0 +1,17 @@
+{
+  "name": "friends-android",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Android shell for Friends: a WebView that loads the live site, with real Android permissions",
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/app": "^6.0.0",
+    "@capacitor/browser": "^6.0.0",
+    "@capacitor/core": "^6.2.0",
+    "capacitor-native-settings": "^6.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^6.2.0"
+  }
+}

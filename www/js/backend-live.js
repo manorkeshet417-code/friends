@@ -59,6 +59,14 @@ export async function LiveBackend(cfg) {
       catch (e) { if (e && (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment')) await Au.signInWithRedirect(auth, p); else throw e; }
     },
     signOut() { return Au.signOut(auth); },
+    // The Android app can't show Google's sign-in page, so Chrome signs in and hands back a Google ID token
+    async googleTokenViaPopup() {
+      const p = new Au.GoogleAuthProvider(); p.setCustomParameters({ prompt: 'select_account' });
+      try { const r = await Au.signInWithPopup(auth, p); const c = Au.GoogleAuthProvider.credentialFromResult(r); return c && c.idToken; }
+      catch (e) { if (e && (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment')) { await Au.signInWithRedirect(auth, p); return null; } throw e; }
+    },
+    async googleTokenFromRedirect() { try { const r = await Au.getRedirectResult(auth); const c = r && Au.GoogleAuthProvider.credentialFromResult(r); return c && c.idToken; } catch (e) { return null; } },
+    signInWithGoogleToken(idToken) { return Au.signInWithCredential(auth, Au.GoogleAuthProvider.credential(idToken)); },
     async saveProfile(o) { await setDoc(doc(db, P + 'users', me.id), o, { merge: true }); Object.assign(me, o); ucache[me.id] = me; },
     // a username is claimed by creating usernames/{name}; the rules refuse a name someone already has
     async claimUsername(name) {

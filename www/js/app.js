@@ -1,14 +1,14 @@
 // Friends app: state, screens and actions (built on Nest's chat, calls and groups)
 import { $, $$, esc, haptic, LS, linkify, MONTHS, DAYS, iso, dayKey, hhmm, fmtDur, ago, listTime, dayLabel, daysTo, nextBirthday,
   COLORS, EMOJIS, REACTIONS, first, nameOf, userColor, chatId, avatar, gtile, prepImage, chatImage, blobToDataURL, recorderMime, icon,
-  EMOJI_SETS, isJumbo, prepVideo, dataURLToObjectURL, questionFor, VIDEO_MAX_SEC, mediaHelp, inAppBrowser } from './util.js';
+  EMOJI_SETS, isJumbo, prepVideo, dataURLToObjectURL, questionFor, VIDEO_MAX_SEC, mediaHelp, inAppBrowser, isNative } from './util.js';
 import { FIREBASE_CONFIG } from './config.js';
 import { LiveBackend } from './backend-live.js';
 import { LocalBackend } from './backend-local.js';
 import { CallManager } from './calls.js';
 
 const root = document.documentElement; root.lang = 'he'; root.dir = 'rtl';
-const standalone = () => matchMedia('(display-mode: standalone), (display-mode: minimal-ui)').matches || navigator.standalone === true;
+const standalone = () => isNative() || matchMedia('(display-mode: standalone), (display-mode: minimal-ui)').matches || navigator.standalone === true;
 if (standalone()) root.classList.add('native');
 const app = $('#app'), navEl = $('#nav'), sheetEl = $('#sheet'), screenEl = $('#screen'), fileEl = $('#file'), phoneEl = $('.phone');
 const onSite = /\.github\.io$/.test(location.hostname);
@@ -228,6 +228,7 @@ function render(navigated, chatChanged) {
   root.style.setProperty('--accent', `var(--g-${((S.screen === 'group' || S.screen === 'groupInfo') && g && g.color) || 'blue'})`);
   let html, bare = false, tabs = '';
   if (S.booting) { bare = true; html = `<div class="loading"><div class="spinner" aria-label="טוען"></div></div>`; }
+  else if (params.has('native_login') && !isNative()) { bare = true; html = viewNativeLogin(); }
   else if (!S.user) { bare = true; html = viewLogin(); }
   else if (!S.user.username) { bare = true; html = viewUsername(); }
   else if (S.screen === 'group' && g) { html = viewGroup(g); tabs = groupTabs(); }
@@ -811,7 +812,7 @@ function emojiSheet(targetId) {
 /* ---------- actions ---------- */
 const listOf = id => S.data.lists.find(l => l.id === id);
 const A = {
-  google: async b => { b.disabled = true; LS.set('friends.joined', 1); try { await be.signIn(); if (!S.user) location.reload(); } catch (e) { if (!(e && (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request'))) fail(e); } finally { b.disabled = false; } },
+  google: async b => { if (isNative()) { nativeSignIn(); return; } b.disabled = true; LS.set('friends.joined', 1); try { await be.signIn(); if (!S.user) location.reload(); } catch (e) { if (!(e && (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request'))) fail(e); } finally { b.disabled = false; } },
   back,
   'root-tab': b => { if (S.tab === b.dataset.v) { scrollTo(0); return; } S.tab = b.dataset.v; if (S.tab === 'profile') refreshMediaPerm(); S.anim = 'fade'; try { history.replaceState({ screen: 'root', tab: S.tab }, ''); } catch (e) {} render(true); },
   gtab: b => {
@@ -2088,7 +2089,36 @@ async function browserFallback() {
   if (r === 0) { const a = document.createElement('a'); a.href = plain; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); }
   if (r === 1) copyText(plain);
 }
+/* ---------- the Friends Android app (Capacitor shell that loads this site) ---------- */
+const capPlugin = n => window.Capacitor.registerPlugin ? window.Capacitor.registerPlugin(n) : window.Capacitor.Plugins[n];
+function openAppSettings() { try { capPlugin('NativeSettings').openAndroid({ option: 'application_details' }).catch(() => hud('פתחו: הגדרות ← אפליקציות ← Friends ← הרשאות', true)); } catch (e) { hud('פתחו: הגדרות ← אפליקציות ← Friends ← הרשאות', true); } }
+const NATIVE_LOGIN = 'https://' + location.host + '/friends/?native_login=1';
+function nativeSignIn() { try { capPlugin('Browser').open({ url: NATIVE_LOGIN }); } catch (e) { location.href = NATIVE_LOGIN; } }
+if (isNative()) {
+  try {
+    // Chrome signed in and sent us back friends://auth?gid=<Google ID token>
+    capPlugin('App').addListener('appUrlOpen', async ({ url }) => {
+      const m = /[?&#]gid=([^&#]+)/.exec(url || ''); if (!m) return;
+      try { capPlugin('Browser').close(); } catch (e) {}
+      try { hud('מתחבר…'); LS.set('friends.joined', 1); await be.signInWithGoogleToken(decodeURIComponent(m[1])); } catch (e) { fail(e); }
+    });
+  } catch (e) { console.warn('native bridge', e); }
+}
+// In Chrome: the page the Android app opens for signing in
+function viewNativeLogin() {
+  const back = S.nativeTok ? 'friends://auth?gid=' + encodeURIComponent(S.nativeTok) : '';
+  return `<div class="onb"><div class="app-icon fr">${icon('people', 56, 1.7)}</div><h1 dir="ltr">Friends</h1><p class="lead">${back ? 'התחברת! חוזרים לאפליקציה.' : 'התחברות לאפליקציית Friends באנדרואיד'}</p></div>
+  <div class="btn-row" style="flex-direction:column">${back ? `<a class="gbtn" href="${esc(back)}">${icon('chev', 18)}<span>חזרה לאפליקציה</span></a>` : `<button class="gbtn" data-a="native-login">${GLOGO}<span>התחברות עם Google</span></button>`}</div>
+  <p class="section-f" style="text-align:center">${back ? 'אם האפליקציה לא נפתחה לבד, לחצו "חזרה לאפליקציה".' : 'אחרי ההתחברות תחזרו אוטומטית לאפליקציה.'}</p>`;
+}
+async function nativeLoginDone(tok) {
+  if (!tok) return; S.nativeTok = tok; render(true);
+  setTimeout(() => { location.href = 'friends://auth?gid=' + encodeURIComponent(tok); }, 300);
+}
+A['native-login'] = async b => { b.disabled = true; try { await nativeLoginDone(await be.googleTokenViaPopup()); } catch (e) { if (!(e && /popup-closed|cancelled-popup/.test(e.code || ''))) fail(e); } finally { b.disabled = false; } };
+
 function browserSection() {
+  if (isNative()) return `<div class="section-h">הגדרות הטלפון</div><div class="list"><button class="row" data-a="app-settings">${icon('gear', 22)}<span class="body t">פתיחת הגדרות האפליקציה</span><span class="chev">${icon('chev', 16)}</span></button></div><p class="section-f">שם: "הרשאות" ← מיקרופון, מצלמה, התראות.</p>`;
   return `<div class="section-h">פתיחה בדפדפן</div><div class="list">${browserLinks().map((l, i) => `<button class="row" data-a="open-browser" data-v="${i}">${icon('link', 22)}<span class="body t">${l.label}</span><span class="chev">${icon('chev', 16)}</span></button>`).join('')}<button class="row" data-a="copy-link">${icon('copy', 22)}<span class="body t">העתקת הקישור</span></button></div>
   <p class="section-f">${standalone() ? `פותח את ${APP_NAME} בדפדפן. שם, ליד הכתובת (🔒 או ⓘ) ← "הרשאות", רואים ומשנים כל הרשאה.` : inAppBrowser() ? 'את/ה עכשיו בתוך אפליקציה אחרת. בדפדפן אפשר להתקין, להיכנס עם Google ולהתקשר.' : 'בדפדפן, ליד הכתובת (🔒 או ⓘ) ← "הרשאות", רואים ומשנים כל הרשאה של האתר.'}</p>`;
 }
@@ -2120,6 +2150,7 @@ function permsHTML() {
 }
 function permSteps(k) {
   const what = k === 'all' ? 'מיקרופון / מצלמה / מיקום / התראות' : PERMS[k].chrome;
+  if (isNative()) return `באפליקציית ${APP_NAME} ההרשאות נמצאות בהגדרות הטלפון:\n1. לחצו "פתיחת הגדרות האפליקציה" (או: הגדרות ← אפליקציות ← ${APP_NAME}).\n2. "הרשאות" ← ${what}.\n3. בחרו "אפשר רק בזמן השימוש באפליקציה".\n4. חזרו ל-${APP_NAME}.`;
   if (isAndroid()) {
     const notif = k === 'notif' || k === 'all' ? `\n\nהתראות אפשר לנהל גם מהגדרות הטלפון: הגדרות ← אפליקציות ← ${APP_NAME} ← התראות ← הפעלה.` : '';
     return `באנדרואיד ההרשאות של ${APP_NAME} שמורות ב-Chrome. הדרך הבטוחה:\n1. פתחו את אפליקציית Chrome (מהמסך הראשי).\n2. ⋮ למעלה ← הגדרות ← הגדרות אתרים ← כל האתרים.\n3. בחרו ${location.host}.\n4. ${what} ← "אפשר".\n5. חזרו ל-${APP_NAME}.\n\nאו: "פתיחה בדפדפן" ← הסמל שליד הכתובת (🔒) ← "הרשאות".\n\nאם גם שם זה חסום, Chrome עצמו חסום בטלפון: הגדרות הטלפון ← אפליקציות ← Chrome ← הרשאות ← ${what} ← "אפשר".${notif}`;
@@ -2131,6 +2162,11 @@ function permSteps(k) {
   return `לחצו על הסמל שליד הכתובת (🔒 או ⓘ) ← "הרשאות האתר" ← ${what} ← "אפשר", ואז רעננו את הדף.`;
 }
 async function permHelp(k) {
+  if (isNative()) {
+    const r = await confirmSheet({ title: k === 'all' ? 'ניהול הרשאות' : `${PERMS[k].label} חסום/ה`, msg: permSteps(k), actions: [{ label: 'פתיחת הגדרות האפליקציה' }, { label: 'הבנתי' }] });
+    if (r === 0) openAppSettings();
+    return;
+  }
   const r = await confirmSheet({ title: k === 'all' ? 'ניהול הרשאות' : `${PERMS[k].label} חסום/ה`, msg: permSteps(k), actions: [{ label: 'פתיחה בדפדפן' }, { label: 'העתקת הקישור' }, { label: 'הבנתי' }] });
   if (r === 0) openInBrowser();
   if (r === 1) copyText(location.origin + location.pathname);
@@ -2152,7 +2188,8 @@ async function permAsk(k) {
 Object.assign(A, {
   'perm-ask': b => permAsk(b.dataset.v),
   'perm-help': b => permHelp(b.dataset.v),
-  'open-browser': b => openInBrowser(b && b.dataset ? b.dataset.v : 0)
+  'open-browser': b => { if (isNative()) openAppSettings(); else openInBrowser(b && b.dataset ? b.dataset.v : 0); },
+  'app-settings': () => openAppSettings()
 });
 
 /* ---------- boot ---------- */
@@ -2161,6 +2198,8 @@ async function boot() {
   const live = FIREBASE_CONFIG && onSite;
   try { be = live ? await LiveBackend(FIREBASE_CONFIG) : LocalBackend(); }
   catch (e) { console.error(e); be = LocalBackend(); hud('לא הצלחנו להתחבר לשרת. בדקו את החיבור ונסו שוב.', true); }
+  // Chrome came back from Google (redirect sign-in) for the Android app: hand the token back
+  if (params.has('native_login') && !isNative() && be.googleTokenFromRedirect) be.googleTokenFromRedirect().then(t => { if (t) nativeLoginDone(t); });
   be.onAuth(u => {
     S.booting = false; S.user = u; S.pending = null;
     if (!u) { stopAll(); S.screen = 'root'; S.tab = 'home'; S.anim = 'fade'; render(true); return; }

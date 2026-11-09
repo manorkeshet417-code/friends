@@ -1,0 +1,13 @@
+{
+  "appId": "io.github.manorkeshet417.friends",
+  "appName": "Friends",
+  "webDir": "shell",
+  "server": {
+    "url": "https://manorkeshet417-code.github.io/friends/app.html",
+    "errorPath": "offline.html",
+    "allowNavigation": ["manorkeshet417-code.github.io"]
+  },
+  "android": {
+    "appendUserAgent": "FriendsAndroid"
+  }
+}
