@@ -1,7 +1,7 @@
 name: Build Android app
 
 # The app is a thin Android shell that loads the live site (www/ on GitHub Pages), so a new APK is needed
-# only when the shell changes. Run it by hand from the Actions tab any time.
+# only when the shell changes. Run it by hand from the Actions tab any time. Signed with FRIENDS_SIGNING.
 on:
   push:
     branches: [main]
