@@ -2061,7 +2061,11 @@ function browserLinks() {
   // The installed app claims every address under /friends/, so Android would just reopen the app.
   // "/friends" (no slash) is outside it: Chrome opens it and GitHub Pages redirects to /friends/ inside Chrome.
   const out = location.pathname.replace(/\/(index\.html)?$/, '') + '?ob=1';
-  if (isAndroid()) return [
+  // Inside the installed app Android blocks intent:// to Chrome, but a plain outside link opens in a Chrome window
+  if (isAndroid()) return standalone() ? [
+    { label: 'פתיחה בדפדפן', href: 'https://' + host + out, blank: true },
+    { label: 'פתיחה ב-Chrome (ישירות)', href: 'intent://' + host + out + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent('https://' + host + out) + ';end' }
+  ] : [
     { label: 'פתיחה בדפדפן (Chrome)', href: 'intent://' + host + out + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent('https://' + host + out) + ';end' },
     { label: 'פתיחה בדפדפן אחר', href: 'https://' + host + out, blank: true }
   ];
