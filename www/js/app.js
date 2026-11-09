@@ -2058,9 +2058,9 @@ const isAndroid = () => /android/i.test(navigator.userAgent);
 const isIPhone = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 function browserLinks() {
   const host = location.host, path = location.pathname + location.search;
-  // The installed app claims every address under /friends/, so Android would just reopen the app.
-  // "/friends" (no slash) is outside it: Chrome opens it and GitHub Pages redirects to /friends/ inside Chrome.
-  const out = location.pathname.replace(/\/(index\.html)?$/, '') + '?ob=1';
+  // The installed app owns only /friends/app.html (its manifest scope); /friends/ itself is a normal
+  // browser page, so a link there opens in Chrome instead of bouncing back into the app.
+  const out = location.pathname.replace(/(app|index)\.html$/, '') + '?ob=1';
   // Inside the installed app Android blocks intent:// to Chrome, but a plain outside link opens in a Chrome window
   if (isAndroid()) return standalone() ? [
     { label: 'פתיחה בדפדפן', href: 'https://' + host + out, blank: true },

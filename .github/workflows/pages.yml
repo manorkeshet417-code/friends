@@ -33,6 +33,8 @@ jobs:
           # install-as-app tags live only on the website, not in the Claude preview
           sed -i 's#<meta charset="utf-8">#<meta charset="utf-8">\n<link rel="manifest" href="manifest.webmanifest">\n<link rel="icon" href="icons/favicon-32.png" sizes="32x32">\n<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">\n<meta name="theme-color" content="\#f2f2f7" media="(prefers-color-scheme: light)">\n<meta name="theme-color" content="\#000000" media="(prefers-color-scheme: dark)">\n<meta name="apple-mobile-web-app-capable" content="yes">\n<meta name="mobile-web-app-capable" content="yes">\n<meta name="apple-mobile-web-app-title" content="Friends">#' _site/index.html
           grep -q 'rel="manifest"' _site/index.html
+          # the installed app lives at app.html (its scope); /friends/ itself stays a normal browser page
+          cp _site/index.html _site/app.html
           # a new cache name per commit, so phones drop the old copy
           sed -i "s/friends-v1/friends-${GITHUB_SHA::8}/" _site/sw.js
 
