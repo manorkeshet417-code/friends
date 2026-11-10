@@ -115,9 +115,4 @@ function schoolReminders() {
   });
   console.log('school reminders sent', sent);
 }
-// Run once from the editor: asks Google for the permissions above and schedules the daily reminders (17:00)
-function setup() {
-  ScriptApp.getProjectTriggers().filter(x => x.getHandlerFunction() === 'schoolReminders').forEach(x => ScriptApp.deleteTrigger(x));
-  ScriptApp.newTrigger('schoolReminders').timeBased().everyDays(1).atHour(17).inTimezone('Asia/Jerusalem').create();
-  console.log('ok: daily school reminders at 17:00');
-}
+// Runs daily from a time trigger (Apps Script > Triggers > schoolReminders, day timer, 17:00-18:00)
