@@ -42,28 +42,31 @@ self.addEventListener('fetch', e => {
   }
 });
 
-// Push from the Nest sender (push/Code.gs via Firebase Cloud Messaging): shown even when the app is closed
+// Push from the Friends sender (push/Code.gs via Firebase Cloud Messaging): shown even when the site is closed.
+// FCM delivers { notification: { title, body }, data: { kind, cid, gid, sender } }
 self.addEventListener('push', e => {
-  let d = {};
-  try { const p = e.data.json(); d = p.data || p; } catch (x) {}
+  let n = {}, d = {};
+  try { const p = e.data.json(); n = p.notification || {}; d = p.data || {}; if (!p.notification && p.title) n = p; } catch (x) {}
   e.waitUntil((async () => {
-    const urgent = !!d.urgent, tag = d.tag || 'friends';
-    // the app is open in front of the user: it shows its own banner (safety alerts and tests still pop)
+    const call = d.kind === 'call', tag = d.cid || d.gid || d.kind || 'friends';
+    // the site is open in front of the user: it shows its own banner (calls and tests still pop)
     const ws = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    if (!urgent && tag !== 'test' && ws.some(w => w.visibilityState === 'visible' && w.focused)) return;
-    await self.registration.showNotification(d.title || 'Nest', {
-      body: d.body || '', tag, renotify: true, requireInteraction: urgent, lang: 'he', dir: 'rtl',
-      vibrate: urgent ? [600, 200, 600, 200, 600, 200, 600] : [200],
-      icon: 'icons/icon-192.png', badge: 'icons/favicon-32.png', data: { url: d.url || './' }
+    if (!call && d.kind !== 'test' && ws.some(w => w.visibilityState === 'visible' && w.focused)) return;
+    await self.registration.showNotification(n.title || 'Friends', {
+      body: n.body || '', tag, renotify: true, requireInteraction: call, lang: 'he', dir: 'rtl',
+      vibrate: call ? [600, 200, 600, 200, 600] : [200],
+      icon: 'icons/icon-192.png', badge: 'icons/favicon-32.png', data: d
     });
   })());
 });
 
-// Tapping a notification brings the app forward
+// Tapping a notification opens the right chat or group
 self.addEventListener('notificationclick', e => {
   e.notification.close();
+  const d = e.notification.data || {};
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(ws => {
-    for (const w of ws) if ('focus' in w) return w.focus();
-    return self.clients.openWindow('./');
+    for (const w of ws) if ('focus' in w) { w.postMessage({ type: 'open-push', data: d }); return w.focus(); }
+    const q = d.cid ? '?pc=' + encodeURIComponent(d.cid) : d.gid ? '?pg=' + encodeURIComponent(d.gid) : '';
+    return self.clients.openWindow('./app.html' + q);
   }));
 });

@@ -10,11 +10,11 @@ export function LocalBackend() {
   const id = () => 'l' + (++uid) + Math.random().toString(36).slice(2, 6);
   const emit = k => { const s = L.get(k); if (s) s.forEach(f => f()); };
   const on = (k, f) => { if (!L.has(k)) L.set(k, new Set()); L.get(k).add(f); f(); return () => L.get(k).delete(f); };
-  const box = gid => sub[gid] || (sub[gid] = { messages: {}, events: [], images: [], imageData: {}, homework: [], exams: [], timetable: {} });
+  const box = gid => sub[gid] || (sub[gid] = { messages: {}, events: [], images: [], imageData: {}, homework: [], exams: [], files: [], fileData: {}, timetable: {} });
   const msgs = s => { const b = box(s.id); return b.messages[s.ch || 'main'] || (b.messages[s.ch || 'main'] = []); };
   const touch = (gid, text) => { const g = groups[gid]; if (g) { g.lastMessage = text.slice(0, 90); g.lastAt = Date.now(); g.lastBy = 'me'; emit('groups'); } };
   const sort = {
-    images: (a, b) => b.createdAt - a.createdAt, homework: (a, b) => a.due < b.due ? -1 : 1, exams: (a, b) => a.date < b.date ? -1 : 1,
+    images: (a, b) => b.createdAt - a.createdAt, files: (a, b) => b.createdAt - a.createdAt, homework: (a, b) => a.due < b.due ? -1 : 1, exams: (a, b) => a.date < b.date ? -1 : 1,
     events: (a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0
   };
   const copy = x => JSON.parse(JSON.stringify(x));
@@ -33,6 +33,8 @@ export function LocalBackend() {
     watchMe(cb) { return on('me', () => cb(copy(me))); },
     async searchUsers() { return [copy(me)]; },
     async follow() { noSite(); },
+    async report() { noSite(); },
+    async deleteNotif() {},
     async followers() { return []; },
 
     watchPosts(cb) { return on('posts', () => cb(copy(posts))); },
@@ -52,7 +54,7 @@ export function LocalBackend() {
     async deletePostComment(pid, cid) { comments[pid] = (comments[pid] || []).filter(c => c.id !== cid); const p = posts.find(q => q.id === pid); if (p) p.commentCount = Math.max(0, p.commentCount - 1); emit('c:' + pid); emit('posts'); },
 
     watchStories(cb) { return on('stories', () => cb(copy(stories.filter(s => s.expiresAt > Date.now())))); },
-    async addStory(img, text) { stories.push({ id: id(), authorId: 'me', image: img.full.data, text: text || '', seen: [], createdAt: Date.now(), expiresAt: Date.now() + 864e5 }); emit('stories'); },
+    async addStory(img, text, extra) { stories.push(Object.assign({ id: id(), authorId: 'me', image: img ? img.full.data : '', text: text || '', seen: [], createdAt: Date.now(), expiresAt: Date.now() + 864e5 }, extra || {})); emit('stories'); },
     async seeStory() {},
     async deleteStory(sid) { const i = stories.findIndex(s => s.id === sid); if (i >= 0) stories.splice(i, 1); emit('stories'); },
 
@@ -102,8 +104,14 @@ export function LocalBackend() {
     async sendMessage(s, m) {
       if (s.t !== 'g') noSite(); m = copy(m); if (m.video && m.video.data) m.video = vid(m.video);
       msgs(s).push(Object.assign({ id: id(), authorId: 'me', createdAt: Date.now(), reactions: {} }, m)); emit(s.id + ':m:' + (s.ch || 'main'));
-      touch(s.id, `${me.name}: ${m.text || (m.image ? '📷 תמונה' : m.video ? '🎬 סרטון' : '🎤 הודעה קולית')}`);
+      touch(s.id, `${me.name}: ${m.text || (m.image ? '📷 תמונה' : m.video ? '🎬 סרטון' : m.poll ? '📊 ' + m.poll.q : m.loc ? '📍 מיקום' : m.sticker || '🎤 הודעה קולית')}`);
     },
+    async vote(s, mid, k) { const m = msgs(s).find(x => x.id === mid); if (m) { m.votes = m.votes || {}; if (k == null) delete m.votes.me; else m.votes.me = k; emit(s.id + ':m:' + (s.ch || 'main')); } },
+    async setChatVanish() { noSite(); },
+    async markGroupRead() {},
+    async addFile(gid, o) { const b = box(gid); const fid = id(); b.fileData[fid] = o.data; b.files.unshift({ id: fid, subject: o.subject, name: o.name, mime: o.mime, size: o.size, by: 'me', createdAt: Date.now() }); emit(gid + ':files'); },
+    async fileData(gid, fid) { return (box(gid).fileData || {})[fid] || ''; },
+    async deleteFile(gid, fid) { const b = box(gid), i = b.files.findIndex(f => f.id === fid); if (i >= 0) b.files.splice(i, 1); emit(gid + ':files'); },
     async react(s, mid, emoji) { const m = msgs(s).find(x => x.id === mid); if (m) { if (emoji) m.reactions.me = emoji; else delete m.reactions.me; emit(s.id + ':m:' + (s.ch || 'main')); } },
     async deleteMessage(s, m) { const l = msgs(s), i = l.findIndex(x => x.id === m.id); if (i >= 0) l.splice(i, 1); emit(s.id + ':m:' + (s.ch || 'main')); },
     async loadVideo(s, v) { return blobs[v.id] || ''; },

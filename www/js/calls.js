@@ -3,7 +3,7 @@
 // Media flows directly between the two phones (STUN only, so some strict networks can block it).
 
 // STUN finds a direct path; the TURN relay carries the call when a mobile network blocks direct paths.
-const ICE = { iceServers: [
+export const ICE = { iceServers: [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.relay.metered.ca:80'] },
   { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' }
 ] };
@@ -122,6 +122,7 @@ export function CallManager(rtc, ui) {
     cur.unsubs.forEach(u => { try { u(); } catch (e) {} });
     try { cur.pc.close(); } catch (e) {}
     if (cur.local) cur.local.getTracks().forEach(t => t.stop());
+    if (cur.screen) cur.screen.getTracks().forEach(t => t.stop());
     clearTimeout(cur.ringTimer);
     cur = null;
     ui.close();
@@ -142,5 +143,17 @@ export function CallManager(rtc, ui) {
     } catch (e) { ui.toast('לא הצלחנו להחליף מצלמה'); }
   }
 
-  return { watchIncoming, start, accept, decline, hangup: () => finish('ended'), toggleMute, toggleCam, flip, get state() { return cur; } };
+  // on a computer: send the screen instead of the camera, and back
+  async function shareScreen() {
+    if (!cur || !cur.local || cur.kind !== 'video' || !navigator.mediaDevices.getDisplayMedia) return;
+    const sender = cur.pc.getSenders().find(x => x.track && x.track.kind === 'video'); if (!sender) return;
+    if (cur.screen) { cur.screen.getTracks().forEach(t => t.stop()); cur.screen = null; await sender.replaceTrack(cur.local.getVideoTracks()[0] || null); ui.update(); return; }
+    try {
+      const s = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const t = s.getVideoTracks()[0]; cur.screen = s; await sender.replaceTrack(t);
+      t.onended = () => { if (cur && cur.screen === s) shareScreen(); };
+      ui.update();
+    } catch (e) { if (e && e.name !== 'NotAllowedError') ui.toast('לא הצלחנו לשתף מסך'); }
+  }
+  return { watchIncoming, start, accept, decline, hangup: () => finish('ended'), toggleMute, toggleCam, flip, shareScreen, get state() { return cur; } };
 }

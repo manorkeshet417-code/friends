@@ -3,6 +3,9 @@
 // The free push sender (push/Code.gs deployed as a Google Apps Script web app). Empty = no push.
 export const PUSH_URL = 'https://script.google.com/macros/s/AKfycbwdlxOe4i8OZ9Aib6WwMvT602USPzHxP14paHDe94Ip1HDeXWN2iVkAPwgAUZyxWpOh/exec';
 
+// Web push certificate (public key) of the Firebase project: notifications on the website and on iPhone
+export const VAPID_KEY = 'BDD48oEVcvQqXvhpRyggAHapbo9Q_pP1Cl_m_y2owKziQ5ewmSaIdBPPtbJqlVNz87uNsV7VXD87t_r1L0Qql7w';
+
 export const FIREBASE_CONFIG = {
   apiKey: 'AIzaSyDkGS4U9-2hugToYYNvAEzUdMC6gXhjkAI',
   authDomain: 'nest-family-d163e.firebaseapp.com',

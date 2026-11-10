@@ -20,9 +20,10 @@ export async function LiveBackend(cfg) {
   };
   const ucache = {};
   let me = null;
-  const preview = m => m.text || (m.image ? '📷 תמונה' : m.video ? '🎬 סרטון' : m.audio ? '🎤 הודעה קולית' : m.kind === 'call' ? '📞 שיחה' : m.share ? '🔗 פוסט' : '');
+  const preview = m => m.text || (m.image ? '📷 תמונה' : m.video ? '🎬 סרטון' : m.audio ? '🎤 הודעה קולית' : m.kind === 'call' ? '📞 שיחה' : m.share ? '🔗 פוסט'
+    : m.poll ? '📊 ' + m.poll.q : m.loc ? '📍 מיקום' : m.sticker ? m.sticker : '');
   const touch = (gid, text) => updateDoc(doc(db, P + 'groups', gid), { lastMessage: text.slice(0, 90), lastAt: serverTimestamp(), lastBy: me.id }).catch(() => {});
-  const order = { events: ['date', 'asc', 100], images: ['createdAt', 'desc', 150], homework: ['due', 'asc', 150], exams: ['date', 'asc', 100] };
+  const order = { events: ['date', 'asc', 100], images: ['createdAt', 'desc', 150], homework: ['due', 'asc', 150], exams: ['date', 'asc', 100], files: ['createdAt', 'desc', 200] };
 
   // videos: base64 split across documents (each under Firestore's 1 MB limit)
   const blobCol = s => s.t === 'p' ? collection(db, P + 'postBlobs') : s.t === 'g' ? collection(db, P + 'groups', s.id, 'blobs') : collection(db, P + 'chats', s.id, 'blobs');
@@ -38,7 +39,7 @@ export async function LiveBackend(cfg) {
 
   return {
     mode: 'live',
-    rtc: { db, F, me: () => me && me.id, calls: P + 'calls' },
+    rtc: { db, F, me: () => me && me.id, calls: P + 'calls', prefix: P },
 
     /* auth & profiles */
     onAuth(cb) {
@@ -62,6 +63,14 @@ export async function LiveBackend(cfg) {
     idToken() { return auth.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(''); },
     // this phone's Firebase Cloud Messaging token, so the push sender can reach it while Friends is closed
     savePushToken(t) { return setDoc(doc(db, P + 'push', me.id), { tokens: arrayUnion(t), at: serverTimestamp() }, { merge: true }); },
+    // the website (and iPhone, from the home screen) gets its token from Firebase Messaging, through our service worker
+    async webPushToken(swReg, vapidKey) {
+      const M = await import(SDK + 'firebase-messaging.js');
+      if (!(await M.isSupported())) return null;
+      return M.getToken(M.getMessaging(fb), { vapidKey, serviceWorkerRegistration: swReg });
+    },
+    // chats and groups whose notifications are off (the push sender skips them)
+    savePushPrefs(p) { return setDoc(doc(db, P + 'push', me.id), p, { merge: true }); },
     dropPushToken(t) { return updateDoc(doc(db, P + 'push', me.id), { tokens: arrayRemove(t) }).catch(() => {}); },
     // The Android app can't show Google's sign-in page, so Chrome signs in and hands back a Google ID token
     async googleTokenViaPopup() {
@@ -95,6 +104,9 @@ export async function LiveBackend(cfg) {
       const s = await getDocs(query(collection(db, P + 'users'), orderBy('username'), startAt(q), endAt(q + ''), limit(20)));
       return s.docs.map(d => Object.assign({ id: d.id }, d.data()));
     },
+    // a report goes to the project owner (only readable in the Firebase console)
+    report(o) { return addDoc(collection(db, P + 'reports'), Object.assign({ by: me.id, createdAt: serverTimestamp() }, o)); },
+    deleteNotif(nid) { return F.deleteDoc(doc(db, P + 'users', me.id, 'notifs', nid)).catch(() => {}); },
     follow(uid, on) { me.following = on ? [...new Set((me.following || []).concat(uid))] : (me.following || []).filter(x => x !== uid); return updateDoc(doc(db, P + 'users', me.id), { following: on ? arrayUnion(uid) : arrayRemove(uid) }); },
     async followers(uid) { const s = await getDocs(query(collection(db, P + 'users'), where('following', 'array-contains', uid), limit(500))); return s.docs.map(d => d.id); },
 
@@ -128,7 +140,8 @@ export async function LiveBackend(cfg) {
 
     /* stories: disappear after 24 hours */
     watchStories(cb, err) { return onSnapshot(query(collection(db, P + 'stories'), where('expiresAt', '>', Date.now()), orderBy('expiresAt', 'asc'), limit(200)), s => cb(s.docs.map(read)), err); },
-    addStory(img, text) { return addDoc(collection(db, P + 'stories'), { authorId: me.id, image: img.full.data, text: text || '', seen: [], createdAt: serverTimestamp(), expiresAt: Date.now() + 864e5 }); },
+    // extra: { close: only my close friends, audio: a voice story { data, dur, mime }, bg: its background }
+    addStory(img, text, extra) { return addDoc(collection(db, P + 'stories'), Object.assign({ authorId: me.id, image: img ? img.full.data : '', text: text || '', seen: [], createdAt: serverTimestamp(), expiresAt: Date.now() + 864e5 }, extra || {})); },
     seeStory(id) { return updateDoc(doc(db, P + 'stories', id), { seen: arrayUnion(me.id) }).catch(() => {}); },
     deleteStory(id) { const b = writeBatch(db); b.delete(doc(db, P + 'stories', id)); return b.commit(); },
 
@@ -192,6 +205,15 @@ export async function LiveBackend(cfg) {
     async addEvent(gid, o) { await addDoc(collection(db, P + 'groups', gid, 'events'), Object.assign({ createdBy: me.id, rsvp: { [me.id]: 'yes' }, createdAt: serverTimestamp() }, o)); touch(gid, `${me.name} הוסיף/ה אירוע: ${o.title}`); },
     rsvp(gid, eid, v) { return updateDoc(doc(db, P + 'groups', gid, 'events', eid), { ['rsvp.' + me.id]: v }); },
     deleteEvent(gid, eid) { const b = writeBatch(db); b.delete(doc(db, P + 'groups', gid, 'events', eid)); return b.commit(); },
+    // class files: the details in files/, the file itself (as a data URL, under ~700 KB) in fileData/
+    async addFile(gid, o) {
+      const ref = doc(collection(db, P + 'groups', gid, 'files')), b = writeBatch(db);
+      b.set(doc(db, P + 'groups', gid, 'fileData', ref.id), { by: me.id, data: o.data });
+      b.set(ref, { subject: o.subject, name: o.name, mime: o.mime, size: o.size, by: me.id, createdAt: serverTimestamp() });
+      await b.commit(); touch(gid, `${me.name} שיתף/ה קובץ ב${o.subject}: ${o.name}`);
+    },
+    async fileData(gid, fid) { const s = await getDoc(doc(db, P + 'groups', gid, 'fileData', fid)); return s.exists() ? s.data().data : ''; },
+    async deleteFile(gid, fid) { const b = writeBatch(db); b.delete(doc(db, P + 'groups', gid, 'files', fid)); b.delete(doc(db, P + 'groups', gid, 'fileData', fid)); await b.commit(); },
     async imageData(gid, iid) { const s = await getDoc(doc(db, P + 'groups', gid, 'imageData', iid)); return s.exists() ? s.data().data : ''; },
     async deleteImage(gid, img) { const b = writeBatch(db); b.delete(doc(db, P + 'groups', gid, 'images', img.id)); b.delete(doc(db, P + 'groups', gid, 'imageData', img.id)); await b.commit(); },
     async addHomework(gid, o) { await addDoc(collection(db, P + 'groups', gid, 'homework'), { subject: o.subject, text: o.text, due: o.due, by: me.id, done: [], createdAt: serverTimestamp() }); touch(gid, `${me.name} הוסיף/ה שיעורי בית ב${o.subject}`); },
@@ -210,6 +232,10 @@ export async function LiveBackend(cfg) {
       if (s.t === 'g') touch(s.id, `${me.name}: ${p}`);
       else updateDoc(scopeDoc(s), { lastMessage: p.slice(0, 90), lastAt: serverTimestamp(), lastBy: me.id, ['reads.' + me.id]: Date.now() }).catch(() => {});
     },
+    // a poll in a chat: each person's choice under votes.<uid>
+    vote(s, mid, k) { return updateDoc(doc(msgCol(s), mid), { ['votes.' + me.id]: k == null ? deleteField() : k }); },
+    setChatVanish(cid, v) { return updateDoc(doc(db, P + 'chats', cid), { vanish: v }); },
+    markGroupRead(gid) { return updateDoc(doc(db, P + 'groups', gid), { ['reads.' + me.id]: Date.now() }).catch(() => {}); },
     react(s, mid, emoji) { return updateDoc(doc(msgCol(s), mid), { ['reactions.' + me.id]: emoji || deleteField() }); },
     async deleteMessage(s, m) { const b = writeBatch(db); b.delete(doc(msgCol(s), m.id)); await b.commit(); dropVideo(s, m.video); },
     async loadVideo(s, v) {

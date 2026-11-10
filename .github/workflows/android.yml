@@ -45,13 +45,16 @@ jobs:
           node -e "
           const fs = require('fs'), f = 'android/app/src/main/AndroidManifest.xml';
           let s = fs.readFileSync(f, 'utf8');
-          const perms = ['RECORD_AUDIO', 'CAMERA', 'MODIFY_AUDIO_SETTINGS', 'POST_NOTIFICATIONS', 'ACCESS_NETWORK_STATE']
+          const perms = ['RECORD_AUDIO', 'CAMERA', 'MODIFY_AUDIO_SETTINGS', 'POST_NOTIFICATIONS', 'ACCESS_NETWORK_STATE', 'ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION']
             .map(p => '    <uses-permission android:name=\"android.permission.' + p + '\" />').join('\n');
           s = s.replace('</manifest>', perms + '\n    <uses-feature android:name=\"android.hardware.camera\" android:required=\"false\" />\n    <uses-feature android:name=\"android.hardware.microphone\" android:required=\"false\" />\n</manifest>');
           const link = '\n            <intent-filter>\n                <action android:name=\"android.intent.action.VIEW\" />\n                <category android:name=\"android.intent.category.DEFAULT\" />\n                <category android:name=\"android.intent.category.BROWSABLE\" />\n                <data android:scheme=\"friends\" android:host=\"auth\" />\n            </intent-filter>';
           s = s.replace('</intent-filter>', '</intent-filter>' + link);
+          // the small white icon in the notification bar
+          s = s.replace(/<application[^>]*>/, m => m + '\n        <meta-data android:name=\"com.google.firebase.messaging.default_notification_icon\" android:resource=\"@drawable/ic_stat_friends\" />');
           fs.writeFileSync(f, s);
           "
+          cp -r assets/notif/. android/app/src/main/res/
           grep -c "RECORD_AUDIO\|android:scheme=\"friends\"" android/app/src/main/AndroidManifest.xml
           # each build gets a higher version number so phones accept it as an update
           sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/" android/app/build.gradle

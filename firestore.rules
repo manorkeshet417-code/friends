@@ -64,6 +64,9 @@ service cloud.firestore {
             && request.resource.data.members == resource.data.members.removeAll([me()]))
         // members update the activity line and the "typing…" indicator
         || (me() in resource.data.members && onlyChanges(['lastMessage', 'lastAt', 'lastBy', 'typing']))
+        // "read by": each member stamps only their own time
+        || (me() in resource.data.members && onlyChanges(['reads'])
+            && request.resource.data.reads.diff(resource.data.get('reads', {})).affectedKeys().hasOnly([me()]))
       );
 
       allow delete: if signedIn() && resource.data.ownerId == me();
@@ -189,12 +192,12 @@ service cloud.firestore {
         && me() in request.resource.data.members
         && cid == request.resource.data.members.join('_');
       allow update: if signedIn() && me() in resource.data.members
-        && onlyChanges(['lastMessage', 'lastAt', 'lastBy', 'reads', 'typing']);
+        && onlyChanges(['lastMessage', 'lastAt', 'lastBy', 'reads', 'typing', 'vanish']);
 
       match /messages/{mid} {
         allow read: if inChat();
         allow create: if inChat() && request.resource.data.authorId == me();
-        allow update: if inChat() && onlyChanges(['reactions']);
+        allow update: if inChat() && (onlyChanges(['reactions']) || (onlyChanges(['votes']) && request.resource.data.votes.diff(resource.data.get('votes', {})).affectedKeys().hasOnly([me()])));
         allow delete: if inChat() && resource.data.authorId == me();
       }
 
@@ -240,7 +243,11 @@ service cloud.firestore {
     match /fr_users/{uid} {
       allow read: if signedIn();
       allow write: if signedIn() && me() == uid
-        && request.resource.data.keys().hasOnly(['name', 'photo', 'username', 'bio', 'following', 'birthday', 'saved'])
+        && request.resource.data.keys().hasOnly(['name', 'photo', 'username', 'bio', 'following', 'birthday', 'saved', 'blocked', 'private', 'approved', 'close'])
+        && (!('blocked' in request.resource.data) || (request.resource.data.blocked is list && request.resource.data.blocked.size() <= 1000))
+        && (!('approved' in request.resource.data) || (request.resource.data.approved is list && request.resource.data.approved.size() <= 2000))
+        && (!('close' in request.resource.data) || (request.resource.data.close is list && request.resource.data.close.size() <= 500))
+        && (!('private' in request.resource.data) || request.resource.data.private is bool)
         && (!('saved' in request.resource.data) || (request.resource.data.saved is list && request.resource.data.saved.size() <= 1000))
         && request.resource.data.name is string && request.resource.data.name.size() <= 40
         && (!('photo' in request.resource.data) || (request.resource.data.photo is string && request.resource.data.photo.size() <= 200000))
@@ -255,7 +262,14 @@ service cloud.firestore {
     match /fr_users/{uid}/notifs/{nid} {
       allow read, delete: if signedIn() && me() == uid;
       allow create: if signedIn() && me() != uid && request.resource.data.from == me()
-        && request.resource.data.type in ['like', 'vlike', 'comment', 'follow', 'story'];
+        && request.resource.data.type in ['like', 'vlike', 'comment', 'follow', 'story', 'request', 'accepted'];
+    }
+
+    // Reports about people or content: anyone signed in can file one; only the project owner reads them (Firebase console).
+    match /fr_reports/{rid} {
+      allow create: if signedIn() && request.resource.data.by == me()
+        && request.resource.data.reason is string && request.resource.data.reason.size() <= 60
+        && request.resource.data.text is string && request.resource.data.text.size() <= 500;
     }
 
     // Usernames: one owner each, first come first served.
@@ -359,6 +373,9 @@ service cloud.firestore {
             && request.resource.data.members == resource.data.members.removeAll([me()]))
         // members update the activity line and the "typing…" indicator
         || (me() in resource.data.members && onlyChanges(['lastMessage', 'lastAt', 'lastBy', 'typing']))
+        // "read by": each member stamps only their own time
+        || (me() in resource.data.members && onlyChanges(['reads'])
+            && request.resource.data.reads.diff(resource.data.get('reads', {})).affectedKeys().hasOnly([me()]))
       );
 
       allow delete: if signedIn() && resource.data.ownerId == me();
@@ -366,13 +383,13 @@ service cloud.firestore {
       match /messages/{mid} {
         allow read: if frIsMember(gid);
         allow create: if frIsMember(gid) && request.resource.data.authorId == me();
-        allow update: if frIsMember(gid) && onlyChanges(['reactions']);
+        allow update: if frIsMember(gid) && (onlyChanges(['reactions']) || (onlyChanges(['votes']) && request.resource.data.votes.diff(resource.data.get('votes', {})).affectedKeys().hasOnly([me()])));
         allow delete: if frIsMember(gid) && (resource.data.authorId == me() || frIsOwner(gid));
       }
       match /channels/{ch}/messages/{mid} {
         allow read: if frIsMember(gid);
         allow create: if frIsMember(gid) && request.resource.data.authorId == me();
-        allow update: if frIsMember(gid) && onlyChanges(['reactions']);
+        allow update: if frIsMember(gid) && (onlyChanges(['reactions']) || (onlyChanges(['votes']) && request.resource.data.votes.diff(resource.data.get('votes', {})).affectedKeys().hasOnly([me()])));
         allow delete: if frIsMember(gid) && (resource.data.authorId == me() || frIsOwner(gid));
       }
       match /events/{eid} {
@@ -412,6 +429,24 @@ service cloud.firestore {
       match /school/{sid} {
         allow read, write: if frIsMember(gid);
       }
+      // class files and summaries (the file itself in fileData)
+      match /files/{fid} {
+        allow read: if frIsMember(gid);
+        allow create: if frIsMember(gid) && request.resource.data.by == me();
+        allow delete: if frIsMember(gid) && (resource.data.by == me() || frIsOwner(gid));
+      }
+      match /fileData/{fid} {
+        allow read: if frIsMember(gid);
+        allow create: if frIsMember(gid) && request.resource.data.by == me();
+        allow delete: if frIsMember(gid) && (resource.data.by == me() || frIsOwner(gid));
+      }
+      // group calls: the room and its signaling, members only
+      match /rooms/{rid} {
+        allow read, write: if frIsMember(gid);
+        match /{rest=**} {
+          allow read, write: if frIsMember(gid);
+        }
+      }
     }
 
     // Private chats between two people. The id is the two user ids, sorted, joined by "_".
@@ -425,12 +460,12 @@ service cloud.firestore {
         && me() in request.resource.data.members
         && cid == request.resource.data.members.join('_');
       allow update: if signedIn() && me() in resource.data.members
-        && onlyChanges(['lastMessage', 'lastAt', 'lastBy', 'reads', 'typing']);
+        && onlyChanges(['lastMessage', 'lastAt', 'lastBy', 'reads', 'typing', 'vanish']);
 
       match /messages/{mid} {
         allow read: if inChat();
         allow create: if inChat() && request.resource.data.authorId == me();
-        allow update: if inChat() && onlyChanges(['reactions']);
+        allow update: if inChat() && (onlyChanges(['reactions']) || (onlyChanges(['votes']) && request.resource.data.votes.diff(resource.data.get('votes', {})).affectedKeys().hasOnly([me()])));
         allow delete: if inChat() && resource.data.authorId == me();
       }
       match /blobs/{bid} {

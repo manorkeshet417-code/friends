@@ -66,13 +66,18 @@ function pushTo(uids, note, data) {
   const call = data.kind === 'call';
   uids.slice(0, 200).forEach(u => {
     const p = get('fr_push/' + u); if (!p) return;
+    // muted chat or group: no notification (calls and school reminders still come)
+    if (!call && data.kind !== 'school' && (data.cid || data.gid) && strs(p.muted).indexOf(data.cid || data.gid) >= 0) return;
+    // the person blocked the sender
+    if (data.sender) { const usr = get('fr_users/' + u); if (usr && strs(usr.blocked).indexOf(data.sender) >= 0) return; }
     strs(p.tokens).slice(-5).forEach(t => reqs.push({
       url: 'https://fcm.googleapis.com/v1/projects/' + PROJECT + '/messages:send', method: 'post', contentType: 'application/json', muteHttpExceptions: true,
       headers: { Authorization: auth, 'x-goog-user-project': PROJECT },
       payload: JSON.stringify({ message: {
         token: t, notification: note, data: data,
         android: { priority: 'high', ttl: call ? '45s' : '86400s',
-          notification: { channel_id: call ? 'calls' : 'msgs', tag: data.cid || data.gid || data.kind, sound: 'default', default_vibrate_timings: true } }
+          notification: { channel_id: call ? 'calls' : 'msgs', tag: data.cid || data.gid || data.kind, sound: 'default', default_vibrate_timings: true, icon: 'ic_stat_friends', color: '#0A84FF' } },
+        webpush: { headers: { Urgency: 'high', TTL: call ? '45' : '86400' } }
       } })
     }));
   });
@@ -82,5 +87,37 @@ function pushTo(uids, note, data) {
   return n;
 }
 
-// Run once from the editor after pasting (asks Google for the permissions above)
-function setup() { ScriptApp.getOAuthToken(); console.log('ok: owner token ready'); }
+/* ---------- school reminders: every afternoon, homework due and exams tomorrow ---------- */
+const OWNER = () => ({ Authorization: 'Bearer ' + ScriptApp.getOAuthToken(), 'x-goog-user-project': PROJECT });
+function listDocs(path) {
+  const r = UrlFetchApp.fetch(FS + path + '?pageSize=300', { headers: OWNER(), muteHttpExceptions: true });
+  return r.getResponseCode() === 200 ? (JSON.parse(r.getContentText()).documents || []) : [];
+}
+function schoolReminders() {
+  const t = Utilities.formatDate(new Date(Date.now() + 864e5), 'Asia/Jerusalem', 'yyyy-MM-dd');
+  const r = UrlFetchApp.fetch('https://firestore.googleapis.com/v1/projects/' + PROJECT + '/databases/(default)/documents:runQuery', {
+    method: 'post', contentType: 'application/json', headers: OWNER(), muteHttpExceptions: true,
+    payload: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'fr_groups' }], where: { fieldFilter: { field: { fieldPath: 'type' }, op: 'EQUAL', value: { stringValue: 'school' } } }, limit: 500 } })
+  });
+  if (r.getResponseCode() !== 200) { console.warn('school query', r.getResponseCode(), r.getContentText().slice(0, 300)); return; }
+  let sent = 0;
+  JSON.parse(r.getContentText()).forEach(row => {
+    if (!row.document) return;
+    const gid = row.document.name.split('/').pop(), g = row.document.fields || {};
+    const hw = listDocs('fr_groups/' + gid + '/homework').filter(d => str((d.fields || {}).due) === t);
+    const ex = listDocs('fr_groups/' + gid + '/exams').filter(d => str((d.fields || {}).date) === t);
+    if (!hw.length && !ex.length) return;
+    strs(g.members).forEach(u => {
+      const items = hw.filter(h => strs(h.fields.done).indexOf(u) < 0).map(h => 'שיעורי בית ב' + str(h.fields.subject))
+        .concat(ex.map(x => 'מבחן ב' + str(x.fields.subject)));
+      if (items.length) sent += pushTo([u], { title: '🎒 ' + clip(str(g.name), 60), body: clip('מחר: ' + items.join(', '), 180) }, { kind: 'school', gid: gid, cid: '', sender: '' });
+    });
+  });
+  console.log('school reminders sent', sent);
+}
+// Run once from the editor: asks Google for the permissions above and schedules the daily reminders (17:00)
+function setup() {
+  ScriptApp.getProjectTriggers().filter(x => x.getHandlerFunction() === 'schoolReminders').forEach(x => ScriptApp.deleteTrigger(x));
+  ScriptApp.newTrigger('schoolReminders').timeBased().everyDays(1).atHour(17).inTimezone('Asia/Jerusalem').create();
+  console.log('ok: daily school reminders at 17:00');
+}
