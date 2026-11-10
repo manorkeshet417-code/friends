@@ -94,6 +94,11 @@ function listDocs(path) {
   return r.getResponseCode() === 200 ? (JSON.parse(r.getContentText()).documents || []) : [];
 }
 function schoolReminders() {
+  // at most once a day, from 16:00 (the trigger may fire every hour)
+  const today = Utilities.formatDate(new Date(), 'Asia/Jerusalem', 'yyyy-MM-dd'), hour = +Utilities.formatDate(new Date(), 'Asia/Jerusalem', 'H');
+  const props = PropertiesService.getScriptProperties();
+  if (hour < 16 || props.getProperty('remindedOn') === today) return;
+  props.setProperty('remindedOn', today);
   const t = Utilities.formatDate(new Date(Date.now() + 864e5), 'Asia/Jerusalem', 'yyyy-MM-dd');
   const r = UrlFetchApp.fetch('https://firestore.googleapis.com/v1/projects/' + PROJECT + '/databases/(default)/documents:runQuery', {
     method: 'post', contentType: 'application/json', headers: OWNER(), muteHttpExceptions: true,
@@ -115,4 +120,4 @@ function schoolReminders() {
   });
   console.log('school reminders sent', sent);
 }
-// Runs daily from a time trigger (Apps Script > Triggers > schoolReminders, day timer, 17:00-18:00)
+// Runs from a time trigger (Apps Script > Triggers > schoolReminders); sends once a day
